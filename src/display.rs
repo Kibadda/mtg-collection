@@ -11,20 +11,16 @@ fn finish_badge(finish: &str) -> String {
 }
 
 fn price_line(prices: &Prices, finish: &str) -> String {
-    let (usd, eur) = if finish == "foil" {
-        (prices.usd_foil.as_deref(), prices.eur_foil.as_deref())
+    let eur = if finish == "foil" {
+        prices.eur_foil.as_deref()
     } else {
-        (prices.usd.as_deref(), prices.eur.as_deref())
+        prices.eur.as_deref()
     };
 
-    let mut parts = Vec::new();
-    if let Some(u) = usd {
-        parts.push(format!("${}", u));
+    match eur {
+        Some(e) => format!("€{}", e),
+        None => String::new(),
     }
-    if let Some(e) = eur {
-        parts.push(format!("€{}", e));
-    }
-    parts.join(" | ")
 }
 
 pub fn print_card(card: &Card) {
@@ -85,18 +81,8 @@ pub fn print_search_result(index: usize, card: &ScryfallCard) {
         println!("      Finishes: {}", finishes);
     }
 
-    let mut prices = Vec::new();
-    if let Some(ref usd) = card.prices.usd {
-        prices.push(format!("${}", usd));
-    }
-    if let Some(ref usd_foil) = card.prices.usd_foil {
-        prices.push(format!("${} foil", usd_foil));
-    }
     if let Some(ref eur) = card.prices.eur {
-        prices.push(format!("€{}", eur));
-    }
-    if !prices.is_empty() {
-        println!("      Price: {}", prices.join(" | "));
+        println!("      Price: €{}", eur);
     }
 }
 
