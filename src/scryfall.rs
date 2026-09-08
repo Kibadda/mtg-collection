@@ -44,6 +44,10 @@ pub struct ScryfallCard {
     #[serde(default)]
     pub released_at: Option<String>,
     #[serde(default)]
+    pub collector_number: String,
+    #[serde(default)]
+    pub promo: bool,
+    #[serde(default)]
     pub games: Vec<String>,
     pub prices: ScryfallPrices,
 }
@@ -77,14 +81,18 @@ pub async fn search_cards(query: &str) -> Result<ScryfallSearchResult, Box<dyn s
 }
 
 /// Build a Scryfall query. By default restricts results to paper cards by
-/// appending `game:paper`, unless the query already sets an explicit
-/// `game:` filter or `paper_only` is disabled.
-pub fn default_query(query: &str, paper_only: bool) -> String {
-    if !paper_only || query.to_ascii_lowercase().contains("game:") {
-        query.to_string()
-    } else {
-        format!("{} game:paper", query.trim_end())
+/// appending `game:paper`, and (when `exclude_promos`) appends `not:promo`.
+/// If the query already sets an explicit `game:` or `promo` filter, the
+/// corresponding default is not appended.
+pub fn default_query(query: &str, paper_only: bool, exclude_promos: bool) -> String {
+    let mut q = query.trim_end().to_string();
+    if paper_only && !q.to_ascii_lowercase().contains("game:") {
+        q.push_str(" game:paper");
     }
+    if exclude_promos && !q.to_ascii_lowercase().contains("promo") {
+        q.push_str(" not:promo");
+    }
+    q
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,18 +166,33 @@ mod tests {
     #[test]
     fn default_query_appends_paper_filter() {
         assert_eq!(
-            default_query("Lightning Bolt", true),
+            default_query("Lightning Bolt", true, true),
+            "Lightning Bolt game:paper not:promo"
+        );
+        assert_eq!(
+            default_query("Lightning Bolt", true, false),
             "Lightning Bolt game:paper"
         );
         assert_eq!(
-            default_query("Lightning Bolt game:paper", true),
-            "Lightning Bolt game:paper"
+            default_query("Lightning Bolt game:paper", true, true),
+            "Lightning Bolt game:paper not:promo"
         );
         assert_eq!(
-            default_query("Lightning Bolt game:arena", true),
-            "Lightning Bolt game:arena"
+            default_query("Lightning Bolt game:arena", true, true),
+            "Lightning Bolt game:arena not:promo"
         );
-        assert_eq!(default_query("Lightning Bolt", false), "Lightning Bolt");
+        assert_eq!(
+            default_query("Lightning Bolt not:promo", true, true),
+            "Lightning Bolt not:promo game:paper"
+        );
+        assert_eq!(
+            default_query("Lightning Bolt", false, true),
+            "Lightning Bolt not:promo"
+        );
+        assert_eq!(
+            default_query("Lightning Bolt", false, false),
+            "Lightning Bolt"
+        );
     }
 
     #[test]
@@ -183,8 +206,9 @@ mod tests {
         }
 
         let name = "!\"Advanced Floral Invocations\"";
-        assert!(total(&default_query(name, false)) > 0);
-        assert_eq!(total(&default_query(name, true)), 0);
+        assert!(total(&default_query(name, false, false)) > 0);
+        assert_eq!(total(&default_query(name, true, true)), 0);
+        assert_eq!(total(&default_query(name, true, false)), 0);
     }
 
     #[test]

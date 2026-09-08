@@ -8,6 +8,9 @@ pub struct Cli {
     /// Include digital-only (Arena/MTGO) cards in searches. Defaults to paper only.
     #[arg(long, global = true)]
     pub all_games: bool,
+    /// Include promo printings (e.g. from promo sets) in searches. Default excludes them.
+    #[arg(long, global = true)]
+    pub all_promos: bool,
 }
 
 #[derive(Subcommand)]
@@ -33,9 +36,16 @@ pub enum Commands {
         /// Condition of the card
         #[arg(short = 'c', long)]
         condition: Option<String>,
+        /// Force a specific set code (e.g. 3ed), skipping the set picker
+        #[arg(long)]
+        set: Option<String>,
     },
     /// Start an interactive session to add many cards
-    AddMany,
+    AddMany {
+        /// Force a specific set code (e.g. 3ed) for the whole session, skipping the set picker
+        #[arg(long)]
+        set: Option<String>,
+    },
     /// Remove a card from your collection
     Remove {
         /// Card name to remove
