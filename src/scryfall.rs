@@ -49,7 +49,50 @@ pub struct ScryfallCard {
     pub promo: bool,
     #[serde(default)]
     pub games: Vec<String>,
+    #[serde(default)]
+    pub image_uris: Option<ImageUris>,
+    #[serde(default)]
+    pub card_faces: Vec<CardFace>,
     pub prices: ScryfallPrices,
+}
+
+impl ScryfallCard {
+    /// Best available full-card image URL for the front face.
+    pub fn image_url(&self) -> Option<&str> {
+        fn best(uris: &ImageUris) -> Option<&str> {
+            uris.large
+                .as_deref()
+                .or(uris.normal.as_deref())
+                .or(uris.small.as_deref())
+                .or(uris.png.as_deref())
+        }
+        self.image_uris
+            .as_ref()
+            .and_then(best)
+            .or_else(|| {
+                self.card_faces
+                    .iter()
+                    .find_map(|face| face.image_uris.as_ref().and_then(best))
+            })
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImageUris {
+    #[serde(default)]
+    pub png: Option<String>,
+    #[serde(default)]
+    pub large: Option<String>,
+    #[serde(default)]
+    pub normal: Option<String>,
+    #[serde(default)]
+    pub small: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CardFace {
+    #[serde(default)]
+    pub image_uris: Option<ImageUris>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -89,6 +132,33 @@ pub async fn search_cards(query: &str) -> Result<ScryfallSearchResult, Box<dyn s
         .json::<ScryfallSearchResult>()
         .await?;
     Ok(resp)
+}
+
+/// Fetch a single card by its Scryfall id, e.g. to look up image URLs for a
+/// card already stored in the collection.
+pub async fn get_card(id: &str) -> Result<ScryfallCard, Box<dyn std::error::Error>> {
+    let url = format!("{}/cards/{}", SCRYFALL_API, id);
+    let resp = client()
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<ScryfallCard>()
+        .await?;
+    Ok(resp)
+}
+
+/// Download a URL (e.g. a Scryfall image) into memory.
+pub async fn fetch_bytes(url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let bytes = client()
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?
+        .to_vec();
+    Ok(bytes)
 }
 
 /// Build a Scryfall query. By default restricts results to paper cards by
@@ -219,6 +289,54 @@ mod tests {
         assert!(total(&default_query(name, false, false)) > 0);
         assert_eq!(total(&default_query(name, true, true)), 0);
         assert_eq!(total(&default_query(name, true, false)), 0);
+    }
+
+    #[test]
+    fn image_url_prefers_large_then_falls_back_to_small_png_and_faces() {
+        let uris = |large, png| ImageUris {
+            png,
+            large,
+            normal: None,
+            small: None,
+        };
+
+        let mut card = ScryfallCard {
+            id: "a".to_string(),
+            name: "Test".to_string(),
+            set: "a".to_string(),
+            set_name: "Set".to_string(),
+            rarity: "rare".to_string(),
+            type_line: "Creature".to_string(),
+            mana_cost: None,
+            oracle_text: None,
+            finishes: vec![],
+            prints_search_uri: None,
+            lang: None,
+            released_at: None,
+            collector_number: String::new(),
+            promo: false,
+            games: vec![],
+            image_uris: Some(uris(Some("https://large".to_string()), None)),
+            card_faces: vec![],
+            prices: ScryfallPrices {
+                usd: None,
+                usd_foil: None,
+                eur: None,
+                eur_foil: None,
+            },
+        };
+        assert_eq!(card.image_url(), Some("https://large"));
+
+        card.image_uris = Some(uris(None, Some("https://png".to_string())));
+        assert_eq!(card.image_url(), Some("https://png"));
+
+        card.image_uris = None;
+        assert_eq!(card.image_url(), None);
+
+        card.card_faces = vec![CardFace {
+            image_uris: Some(uris(Some("https://face".to_string()), None)),
+        }];
+        assert_eq!(card.image_url(), Some("https://face"));
     }
 
     #[test]

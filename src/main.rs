@@ -1,6 +1,7 @@
 mod cli;
 mod collection;
 mod display;
+mod image;
 mod scryfall;
 
 use clap::Parser;
@@ -205,6 +206,10 @@ async fn main() {
                 return;
             };
 
+            if let Ok(scard) = scryfall::get_card(&card.id).await {
+                image::show_card_image(&scard).await;
+            }
+
             println!();
             display::print_card(card);
             println!();
@@ -238,6 +243,8 @@ async fn add_flow(collection: &mut collection::Collection, path: &Path, flow: Ad
     else {
         return;
     };
+
+    image::show_card_image(&picked.card).await;
 
     let quantity = flow.count.unwrap_or_else(prompt_quantity);
     let condition = match flow.condition {
@@ -630,6 +637,8 @@ mod tests {
             collector_number: num.to_string(),
             promo,
             games: vec!["paper".to_string()],
+            image_uris: None,
+            card_faces: vec![],
             prices: scryfall::ScryfallPrices {
                 usd: Some("1.00".to_string()),
                 usd_foil: None,
