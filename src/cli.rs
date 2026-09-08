@@ -13,7 +13,7 @@ pub struct Cli {
     pub all_promos: bool,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum Commands {
     /// Search for cards using Scryfall syntax
     Search {
@@ -60,7 +60,7 @@ pub enum Commands {
     },
 }
 
-#[derive(Clone, Copy, PartialEq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
 pub enum Finish {
     Nonfoil,
     Foil,
@@ -72,5 +72,105 @@ impl std::fmt::Display for Finish {
             Finish::Nonfoil => write!(f, "nonfoil"),
             Finish::Foil => write!(f, "foil"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("mtg-collection").chain(args.iter().copied()))
+            .unwrap_or_else(|e| panic!("failed to parse {args:?}: {e}"))
+    }
+
+    #[test]
+    fn add_parses_query_and_flags() {
+        let Cli {
+            command,
+            all_games,
+            all_promos,
+        } = parse(&[
+            "add",
+            "--set",
+            "3ed",
+            "-n",
+            "2",
+            "-f",
+            "foil",
+            "-c",
+            "LP",
+            "Counterspell",
+            "set:3ed",
+        ]);
+        assert!(!all_games);
+        assert!(!all_promos);
+        match command {
+            Commands::Add {
+                query,
+                count,
+                finish,
+                condition,
+                set,
+            } => {
+                assert_eq!(query, ["Counterspell", "set:3ed"]);
+                assert_eq!(count, Some(2));
+                assert_eq!(finish, Some(Finish::Foil));
+                assert_eq!(condition.as_deref(), Some("LP"));
+                assert_eq!(set.as_deref(), Some("3ed"));
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_defaults() {
+        let Cli { command, .. } = parse(&["add", "Lightning", "Bolt"]);
+        match command {
+            Commands::Add {
+                query,
+                count,
+                finish,
+                condition,
+                set,
+            } => {
+                assert_eq!(query, ["Lightning", "Bolt"]);
+                assert_eq!(count, None);
+                assert_eq!(finish, None);
+                assert_eq!(condition, None);
+                assert_eq!(set, None);
+            }
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_many_parses_set() {
+        let Cli { command, .. } = parse(&["add-many", "--set", "hoc"]);
+        match command {
+            Commands::AddMany { set } => assert_eq!(set.as_deref(), Some("hoc")),
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn global_flags_work_after_subcommand() {
+        let Cli {
+            command,
+            all_games,
+            all_promos,
+        } = parse(&["search", "--all-games", "--all-promos", "Sol", "Ring"]);
+        assert!(all_games);
+        assert!(all_promos);
+        match command {
+            Commands::Search { query } => assert_eq!(query, ["Sol", "Ring"]),
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn finish_display() {
+        assert_eq!(Finish::Foil.to_string(), "foil");
+        assert_eq!(Finish::Nonfoil.to_string(), "nonfoil");
     }
 }

@@ -108,3 +108,36 @@ pub fn print_collection(cards: &[Card]) {
     println!("{}", style("─".repeat(60)).dim());
     println!("{}", style(format!("Total: {} cards", total)).bold());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prices(eur: Option<&str>, eur_foil: Option<&str>) -> Prices {
+        Prices {
+            usd: Some("9.99".to_string()),
+            usd_foil: Some("19.99".to_string()),
+            eur: eur.map(|s| s.to_string()),
+            eur_foil: eur_foil.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn price_line_shows_only_euro_for_nonfoil() {
+        assert_eq!(price_line(&prices(Some("1.23"), None), "nonfoil"), "€1.23");
+    }
+
+    #[test]
+    fn price_line_uses_foil_euro_for_foil() {
+        assert_eq!(
+            price_line(&prices(Some("1.23"), Some("4.56")), "foil"),
+            "€4.56"
+        );
+    }
+
+    #[test]
+    fn price_line_empty_when_missing() {
+        assert_eq!(price_line(&prices(None, None), "nonfoil"), "");
+        assert_eq!(price_line(&prices(None, None), "foil"), "");
+    }
+}

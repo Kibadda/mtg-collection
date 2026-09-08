@@ -323,6 +323,19 @@ fn is_english(card: &ScryfallCard) -> bool {
     card.lang.as_deref().unwrap_or("en") == "en"
 }
 
+/// English printings, deduped by card id (each printing is its own choice).
+/// Promo printings are dropped when `exclude_promos` is set.
+fn distinct_printings(prints: &[ScryfallCard], exclude_promos: bool) -> Vec<&ScryfallCard> {
+    let mut seen = std::collections::HashSet::new();
+    let mut rows = Vec::new();
+    for c in prints {
+        if is_english(c) && seen.insert(&c.id) && !(exclude_promos && c.promo) {
+            rows.push(c);
+        }
+    }
+    rows
+}
+
 /// After a card name has been chosen:
 /// 1. pick which exact printing to add (prompt, or filtered by `set_code`),
 /// 2. resolve the finish (flag, or prompt from that printing's own finishes),
@@ -351,18 +364,7 @@ async fn select_printing(
     };
 
     // English printings, deduped by card id (each printing is its own choice).
-    let mut seen = std::collections::HashSet::new();
-    let mut rows: Vec<&ScryfallCard> = Vec::new();
-    for c in &prints {
-        if is_english(c) && seen.insert(&c.id) {
-            rows.push(c);
-        }
-    }
-
-    // Promo printings are excluded by default.
-    if exclude_promos {
-        rows.retain(|c| !c.promo);
-    }
+    let rows = distinct_printings(&prints, exclude_promos);
 
     // Narrow to the forced set if `--set <CODE>` was given.
     let mut candidates: Vec<&ScryfallCard> = if let Some(code) = set_code {
@@ -582,4 +584,106 @@ fn confirm(prompt: &str, default: bool) -> bool {
         .ok()
         .flatten()
         .unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scard(id: &str, set: &str, num: &str, finishes: &[&str], promo: bool) -> ScryfallCard {
+        ScryfallCard {
+            id: id.to_string(),
+            name: "Test Card".to_string(),
+            set: set.to_string(),
+            set_name: format!("Set {}", set.to_uppercase()),
+            rarity: "rare".to_string(),
+            type_line: "Creature".to_string(),
+            mana_cost: Some("{R}".to_string()),
+            oracle_text: Some("Ability".to_string()),
+            finishes: finishes.iter().map(|s| s.to_string()).collect(),
+            prints_search_uri: None,
+            lang: Some("en".to_string()),
+            released_at: Some("2024-01-01".to_string()),
+            collector_number: num.to_string(),
+            promo,
+            games: vec!["paper".to_string()],
+            prices: scryfall::ScryfallPrices {
+                usd: Some("1.00".to_string()),
+                usd_foil: None,
+                eur: Some("0.80".to_string()),
+                eur_foil: Some("2.50".to_string()),
+            },
+        }
+    }
+
+    fn non_english(id: &str) -> ScryfallCard {
+        let mut c = scard(id, "hoc", "1", &["nonfoil"], false);
+        c.lang = Some("de".to_string());
+        c
+    }
+
+    #[test]
+    fn distinct_printings_dedupes_by_id_and_skips_non_english() {
+        let prints = vec![
+            scard("a", "hoc", "19", &["nonfoil", "foil"], false),
+            scard("b", "hoc", "59", &["foil"], false),
+            scard("a", "hoc", "19", &["nonfoil", "foil"], false),
+            non_english("c"),
+        ];
+        let rows = distinct_printings(&prints, false);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].collector_number, "19");
+        assert_eq!(rows[1].collector_number, "59");
+    }
+
+    #[test]
+    fn distinct_printings_excludes_promos_by_default() {
+        let prints = vec![
+            scard("a", "ltr", "103", &["nonfoil", "foil"], false),
+            scard("b", "pltr", "103s", &["foil"], true),
+        ];
+        let rows = distinct_printings(&prints, true);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].set, "ltr");
+
+        let all = distinct_printings(&prints, false);
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn printing_label_includes_set_code_number_and_finishes() {
+        let label = printing_label(&scard("a", "hoc", "59", &["foil"], false));
+        assert!(label.contains("(HOC 59)"));
+        assert!(label.contains("[foil]"));
+
+        let bare = printing_label(&scard("b", "ltr", "", &[], false));
+        assert!(bare.contains("(LTR)"));
+        assert!(!bare.contains('['));
+    }
+
+    #[test]
+    fn card_from_scryfall_maps_fields_and_prices() {
+        let card = card_from_scryfall(
+            scard("id-1", "3ed", "44", &["nonfoil", "foil"], false),
+            2,
+            "foil".to_string(),
+            "LP".to_string(),
+        );
+
+        assert_eq!(card.id, "id-1");
+        assert_eq!(card.name, "Test Card");
+        assert_eq!(card.set, "3ed");
+        assert_eq!(card.quantity, 2);
+        assert_eq!(card.finish, "foil");
+        assert_eq!(card.condition, "LP");
+        assert_eq!(card.prices.usd.as_deref(), Some("1.00"));
+        assert_eq!(card.prices.eur_foil.as_deref(), Some("2.50"));
+    }
+
+    #[test]
+    fn prompt_finish_defaults_deterministically() {
+        let empty: Vec<String> = vec![];
+        assert_eq!(prompt_finish(&empty), "nonfoil");
+        assert_eq!(prompt_finish(&["foil".to_string()]), "foil");
+    }
 }
