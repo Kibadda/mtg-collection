@@ -24,11 +24,10 @@ async fn main() {
 
     match cli.command {
         Commands::Search { query } => {
-            let q = query.join(" ");
-            if q.is_empty() {
-                eprintln!("{}", style("Error: please provide a search query").red());
-                std::process::exit(1);
-            }
+            let Some(q) = resolve_query(&query, "Search query") else {
+                println!("{}", style("No search query.").dim());
+                return;
+            };
 
             match scryfall::search_cards(&scryfall::default_query(
                 &q,
@@ -71,14 +70,10 @@ async fn main() {
             condition,
             set,
         } => {
-            let q = query.join(" ");
-            if q.is_empty() {
-                eprintln!(
-                    "{}",
-                    style("Error: please provide a card name or search query").red()
-                );
-                std::process::exit(1);
-            }
+            let Some(q) = resolve_query(&query, "Card name or search query") else {
+                println!("{}", style("No card name or query.").dim());
+                return;
+            };
 
             let mut collection = collection::Collection::load(&path);
             let finish_flag = finish.map(|f| f.to_string());
@@ -141,20 +136,29 @@ async fn main() {
 
         Commands::Remove { name } => {
             let card_name = name.join(" ");
-            if card_name.is_empty() {
-                eprintln!("{}", style("Error: please provide a card name").red());
-                std::process::exit(1);
-            }
 
             let mut collection = collection::Collection::load(&path);
-            let matches = collection.search(&card_name);
+            let matches: Vec<&Card> = if card_name.is_empty() {
+                if collection.cards.is_empty() {
+                    println!("{}", style("Collection is empty.").dim());
+                    return;
+                }
+                collection.cards.iter().collect()
+            } else {
+                collection.search(&card_name)
+            };
 
-            let Some(card) = select_collection_card(matches, "Select card to remove") else {
+            if matches.is_empty() {
                 println!(
                     "{}",
                     style(format!("No card matching '{}' in collection.", card_name)).red()
                 );
                 std::process::exit(1);
+            }
+
+            let Some(card) = select_collection_card(matches, "Select card to remove") else {
+                println!("{}", style("Cancelled.").dim());
+                return;
             };
 
             let card_clone = card.clone();
@@ -184,13 +188,17 @@ async fn main() {
 
         Commands::Show { name } => {
             let card_name = name.join(" ");
-            if card_name.is_empty() {
-                eprintln!("{}", style("Error: please provide a card name").red());
-                std::process::exit(1);
-            }
 
             let collection = collection::Collection::load(&path);
-            let matches = collection.search(&card_name);
+            let matches: Vec<&Card> = if card_name.is_empty() {
+                if collection.cards.is_empty() {
+                    println!("{}", style("Collection is empty.").dim());
+                    return;
+                }
+                collection.cards.iter().collect()
+            } else {
+                collection.search(&card_name)
+            };
 
             if matches.is_empty() {
                 eprintln!(
@@ -577,6 +585,36 @@ fn is_interactive() -> bool {
     std::io::stdin().is_terminal()
 }
 
+/// Prompt for a query interactively. Returns `None` when running with a
+/// non-terminal stdin or when the user enters nothing.
+fn prompt_query(label: &str) -> Option<String> {
+    if !is_interactive() {
+        return None;
+    }
+    let input = Input::<String>::with_theme(&ColorfulTheme::default())
+        .with_prompt(label)
+        .allow_empty(true)
+        .interact()
+        .ok()?;
+    let trimmed = input.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+/// Combine trailing-argument words into a query, prompting interactively when
+/// nothing was given on the command line. Returns `None` when no query could
+/// be resolved.
+fn resolve_query(words: &[String], label: &str) -> Option<String> {
+    let joined = words.join(" ").trim().to_string();
+    if !joined.is_empty() {
+        return Some(joined);
+    }
+    prompt_query(label)
+}
+
 fn fuzzy_pick(prompt: &str, items: &[String], default: usize) -> Option<usize> {
     if !is_interactive() {
         return Some(default);
@@ -717,5 +755,18 @@ mod tests {
         let empty: Vec<String> = vec![];
         assert_eq!(prompt_finish(&empty), "nonfoil");
         assert_eq!(prompt_finish(&["foil".to_string()]), "foil");
+    }
+
+    #[test]
+    fn resolve_query_joins_words_variadic_style() {
+        assert_eq!(
+            resolve_query(&["Lightning".to_string(), "Bolt".to_string()], "Search"),
+            Some("Lightning Bolt".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_query_requires_prompt_for_empty_words() {
+        assert_eq!(resolve_query(&[], "Search"), None);
     }
 }
