@@ -24,6 +24,8 @@ pub struct Card {
     pub finish: String,
     #[serde(default = "default_condition")]
     pub condition: String,
+    #[serde(default = "default_lang")]
+    pub lang: String,
 }
 
 fn default_finish() -> String {
@@ -32,6 +34,10 @@ fn default_finish() -> String {
 
 fn default_condition() -> String {
     DEFAULT_CONDITION.to_string()
+}
+
+fn default_lang() -> String {
+    "en".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -133,6 +139,7 @@ mod tests {
             quantity,
             finish: finish.to_string(),
             condition: condition.to_string(),
+            lang: "en".to_string(),
         }
     }
 
@@ -188,5 +195,14 @@ mod tests {
         assert_eq!(collection.search("test card").len(), 2);
         assert_eq!(collection.search("TEST").len(), 2);
         assert_eq!(collection.search("zzz").len(), 0);
+    }
+
+    #[test]
+    fn lang_defaults_to_english_when_missing() {
+        let json = r#"{"id":"a","name":"X","set":"3ed","set_name":"Set","rarity":"rare","type_line":"Instant","prices":{"usd":null,"usd_foil":null,"eur":null,"eur_foil":null}}"#;
+        let card: Card = serde_json::from_str(json).unwrap();
+        assert_eq!(card.lang, "en");
+        assert_eq!(card.condition, DEFAULT_CONDITION);
+        assert_eq!(card.finish, "nonfoil");
     }
 }

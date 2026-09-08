@@ -10,6 +10,14 @@ fn finish_badge(finish: &str) -> String {
     }
 }
 
+fn lang_badge(lang: &str) -> String {
+    if lang == "en" {
+        String::new()
+    } else {
+        style(format!(" [{}]", lang)).dim().to_string()
+    }
+}
+
 fn price_line(prices: &Prices, finish: &str) -> String {
     let eur = if finish == "foil" {
         prices.eur_foil.as_deref()
@@ -37,8 +45,15 @@ pub fn print_card(card: &Card) {
     let cond = style(&card.condition).dim().blue();
 
     println!(
-        "  {} {} | {} | {} [{} {}]{}",
-        name, set, rarity, type_line, finish, cond, qty
+        "  {} {} | {} | {} [{} {}]{}{}",
+        name,
+        set,
+        rarity,
+        type_line,
+        finish,
+        cond,
+        lang_badge(&card.lang),
+        qty
     );
 
     if let Some(ref cost) = card.mana_cost {
@@ -139,5 +154,11 @@ mod tests {
     fn price_line_empty_when_missing() {
         assert_eq!(price_line(&prices(None, None), "nonfoil"), "");
         assert_eq!(price_line(&prices(None, None), "foil"), "");
+    }
+
+    #[test]
+    fn lang_badge_only_for_non_english() {
+        assert_eq!(lang_badge("en"), "");
+        assert!(lang_badge("de").contains("de"));
     }
 }

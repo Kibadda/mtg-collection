@@ -1,5 +1,5 @@
 use crate::scryfall::ScryfallCard;
-use console::{style, Term};
+use console::{Term, style};
 use std::io::{Cursor, IsTerminal};
 
 /// Print a card's front art inline via the Kitty graphics protocol.
@@ -51,11 +51,9 @@ mod tests {
     fn real_card_image_fetches_and_decodes() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
-            .block_on(crate::scryfall::search_cards(&crate::scryfall::default_query(
-                "!Counterspell",
-                true,
-                false,
-            )))
+            .block_on(crate::scryfall::search_cards(
+                &crate::scryfall::default_query("!Counterspell", true, false),
+            ))
             .unwrap();
         let url = result.data[0]
             .image_url()

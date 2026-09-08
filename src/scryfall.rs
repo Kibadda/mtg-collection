@@ -66,14 +66,11 @@ impl ScryfallCard {
                 .or(uris.small.as_deref())
                 .or(uris.png.as_deref())
         }
-        self.image_uris
-            .as_ref()
-            .and_then(best)
-            .or_else(|| {
-                self.card_faces
-                    .iter()
-                    .find_map(|face| face.image_uris.as_ref().and_then(best))
-            })
+        self.image_uris.as_ref().and_then(best).or_else(|| {
+            self.card_faces
+                .iter()
+                .find_map(|face| face.image_uris.as_ref().and_then(best))
+        })
     }
 }
 
