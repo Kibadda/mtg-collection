@@ -5,18 +5,21 @@ mod scryfall;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use collection::{CONDITION_OPTIONS, Card, DEFAULT_CONDITION, Prices};
+use collection::{CONDITION_OPTIONS, Card, DEFAULT_CONDITION};
 use console::style;
 use dialoguer::{FuzzySelect, Input, Select, theme::ColorfulTheme};
 use scryfall::ScryfallCard;
 use std::io::IsTerminal;
+use std::path::Path;
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
     let path = collection::collection_path();
-    let paper_only = !cli.all_games;
-    let exclude_promos = !cli.all_promos;
+    let scope = Scope {
+        paper_only: !cli.all_games,
+        exclude_promos: !cli.all_promos,
+    };
 
     match cli.command {
         Commands::Search { query } => {
@@ -26,8 +29,12 @@ async fn main() {
                 std::process::exit(1);
             }
 
-            match scryfall::search_cards(&scryfall::default_query(&q, paper_only, exclude_promos))
-                .await
+            match scryfall::search_cards(&scryfall::default_query(
+                &q,
+                scope.paper_only,
+                scope.exclude_promos,
+            ))
+            .await
             {
                 Ok(result) => {
                     if result.data.is_empty() {
@@ -75,49 +82,20 @@ async fn main() {
             let mut collection = collection::Collection::load(&path);
             let finish_flag = finish.map(|f| f.to_string());
 
-            if let Some(picked) = pick_scryfall_card(
-                &q,
-                paper_only,
-                set.as_deref(),
-                finish_flag.as_deref(),
-                exclude_promos,
+            add_flow(
+                &mut collection,
+                &path,
+                AddFlow {
+                    scope,
+                    query: &q,
+                    set_code: set.as_deref(),
+                    finish_flag: finish_flag.as_deref(),
+                    count,
+                    condition,
+                    verbose: true,
+                },
             )
-            .await
-            {
-                let quantity = count.unwrap_or_else(prompt_quantity);
-                let card_condition = match condition {
-                    Some(c) => c,
-                    None => prompt_condition(),
-                };
-
-                let card = card_from_scryfall(
-                    picked.card,
-                    quantity,
-                    picked.finish,
-                    card_condition.clone(),
-                );
-                println!();
-                display::print_card(&card);
-                println!();
-
-                if confirm_add() {
-                    let name_clone = card.name.clone();
-                    let finish_clone = card.finish.clone();
-                    collection.add_card(card);
-                    collection.save(&path);
-                    println!(
-                        "{}",
-                        style(format!(
-                            "Added x{} '{}' [{} {}] to your collection.",
-                            quantity, name_clone, finish_clone, card_condition
-                        ))
-                        .green()
-                        .bold()
-                    );
-                } else {
-                    println!("{}", style("Cancelled.").dim());
-                }
-            }
+            .await;
         }
 
         Commands::AddMany { set } => {
@@ -142,26 +120,20 @@ async fn main() {
                     break;
                 }
 
-                if let Some(picked) =
-                    pick_scryfall_card(&q, paper_only, set.as_deref(), None, exclude_promos).await
-                {
-                    let quantity = prompt_quantity();
-                    let condition = prompt_condition();
-
-                    let card =
-                        card_from_scryfall(picked.card, quantity, picked.finish, condition.clone());
-                    println!();
-                    display::print_card(&card);
-                    println!();
-
-                    if confirm_add() {
-                        collection.add_card(card);
-                        collection.save(&path);
-                        println!("{}", style("Added.").green().bold());
-                    } else {
-                        println!("{}", style("Skipped.").dim());
-                    }
-                }
+                add_flow(
+                    &mut collection,
+                    &path,
+                    AddFlow {
+                        scope,
+                        query: &q,
+                        set_code: set.as_deref(),
+                        finish_flag: None,
+                        count: None,
+                        condition: None,
+                        verbose: false,
+                    },
+                )
+                .await;
                 println!();
             }
         }
@@ -240,6 +212,70 @@ async fn main() {
     }
 }
 
+/// Search-scoping flags derived from the global `--all-games`/`--all-promos` options.
+#[derive(Clone, Copy)]
+struct Scope {
+    paper_only: bool,
+    exclude_promos: bool,
+}
+
+/// Everything needed to add one card, shared by `add` and `add-many`.
+struct AddFlow<'a> {
+    scope: Scope,
+    query: &'a str,
+    set_code: Option<&'a str>,
+    finish_flag: Option<&'a str>,
+    count: Option<u32>,
+    condition: Option<String>,
+    verbose: bool,
+}
+
+/// One add operation: search-and-pick the card, resolve quantity, finish and
+/// condition, then confirm and store.
+async fn add_flow(collection: &mut collection::Collection, path: &Path, flow: AddFlow<'_>) {
+    let Some(picked) =
+        pick_scryfall_card(flow.query, flow.scope, flow.set_code, flow.finish_flag).await
+    else {
+        return;
+    };
+
+    let quantity = flow.count.unwrap_or_else(prompt_quantity);
+    let condition = match flow.condition {
+        Some(c) => c,
+        None => prompt_condition(),
+    };
+
+    let card = card_from_scryfall(picked.card, quantity, picked.finish, condition.clone());
+    println!();
+    display::print_card(&card);
+    println!();
+
+    if !confirm_add() {
+        println!(
+            "{}",
+            style(if flow.verbose {
+                "Cancelled."
+            } else {
+                "Skipped."
+            })
+            .dim()
+        );
+        return;
+    }
+
+    let message = if flow.verbose {
+        format!(
+            "Added x{} '{}' [{} {}] to your collection.",
+            quantity, card.name, card.finish, condition
+        )
+    } else {
+        "Added.".to_string()
+    };
+    collection.add_card(card);
+    collection.save(path);
+    println!("{}", style(message).green().bold());
+}
+
 fn card_from_scryfall(
     card: ScryfallCard,
     quantity: u32,
@@ -255,12 +291,7 @@ fn card_from_scryfall(
         type_line: card.type_line,
         mana_cost: card.mana_cost,
         oracle_text: card.oracle_text,
-        prices: Prices {
-            usd: card.prices.usd,
-            usd_foil: card.prices.usd_foil,
-            eur: card.prices.eur,
-            eur_foil: card.prices.eur_foil,
-        },
+        prices: card.prices.into(),
         quantity,
         finish,
         condition,
@@ -269,12 +300,11 @@ fn card_from_scryfall(
 
 async fn pick_scryfall_card(
     query: &str,
-    paper_only: bool,
+    scope: Scope,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
-    exclude_promos: bool,
 ) -> Option<PickedCard> {
-    let q = scryfall::default_query(query, paper_only, exclude_promos);
+    let q = scryfall::default_query(query, scope.paper_only, scope.exclude_promos);
     let card = match scryfall::search_cards(&q).await {
         Ok(result) if !result.data.is_empty() => {
             if result.data.len() == 1 {
@@ -308,7 +338,7 @@ async fn pick_scryfall_card(
     };
 
     match card {
-        Some(c) => select_printing(c, paper_only, set_code, finish_flag, exclude_promos).await,
+        Some(c) => select_printing(c, scope, set_code, finish_flag).await,
         None => None,
     }
 }
@@ -342,12 +372,11 @@ fn distinct_printings(prints: &[ScryfallCard], exclude_promos: bool) -> Vec<&Scr
 /// 3. return that printing plus the chosen finish.
 async fn select_printing(
     card: ScryfallCard,
-    paper_only: bool,
+    scope: Scope,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
-    exclude_promos: bool,
 ) -> Option<PickedCard> {
-    let prints = match scryfall::get_all_printings(&card, paper_only).await {
+    let prints = match scryfall::get_all_printings(&card, scope.paper_only).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
@@ -364,29 +393,27 @@ async fn select_printing(
     };
 
     // English printings, deduped by card id (each printing is its own choice).
-    let rows = distinct_printings(&prints, exclude_promos);
+    let rows = distinct_printings(&prints, scope.exclude_promos);
 
-    // Narrow to the forced set if `--set <CODE>` was given.
-    let mut candidates: Vec<&ScryfallCard> = if let Some(code) = set_code {
-        rows.iter()
+    // Narrow to the forced set if `--set <CODE>` was given; fall back to all
+    // printings (with a warning) when the card has none in that set.
+    let mut candidates: Vec<&ScryfallCard> = rows.clone();
+    if let Some(code) = set_code {
+        let narrowed: Vec<&ScryfallCard> = rows
+            .iter()
             .filter(|c| c.set.eq_ignore_ascii_case(code))
             .copied()
-            .collect()
-    } else {
-        rows.clone()
-    };
-    if set_code.is_some() && candidates.is_empty() {
-        if rows.len() > 1 {
-            println!(
-                "{}",
-                style(format!(
-                    "Card not printed in set '{}'.",
-                    set_code.unwrap_or_default()
-                ))
-                .yellow()
-            );
+            .collect();
+        if narrowed.is_empty() {
+            if rows.len() > 1 {
+                println!(
+                    "{}",
+                    style(format!("Card not printed in set '{}'.", code)).yellow()
+                );
+            }
+        } else {
+            candidates = narrowed;
         }
-        candidates = rows.clone();
     }
 
     let chosen: Option<&ScryfallCard> = if candidates.is_empty() {
@@ -412,15 +439,11 @@ async fn select_printing(
             })
             .unwrap_or(0);
 
-        let selection = if is_interactive() {
-            fuzzy_pick(
-                &format!("Select printing for '{}'", card.name),
-                &labels,
-                default_idx,
-            )
-        } else {
-            Some(default_idx)
-        };
+        let selection = fuzzy_pick(
+            &format!("Select printing for '{}'", card.name),
+            &labels,
+            default_idx,
+        );
 
         match selection {
             Some(idx) => candidates.into_iter().nth(idx),

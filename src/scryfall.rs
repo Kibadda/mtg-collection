@@ -64,6 +64,17 @@ pub struct ScryfallPrices {
     pub eur_foil: Option<String>,
 }
 
+impl From<ScryfallPrices> for crate::collection::Prices {
+    fn from(p: ScryfallPrices) -> Self {
+        Self {
+            usd: p.usd,
+            usd_foil: p.usd_foil,
+            eur: p.eur,
+            eur_foil: p.eur_foil,
+        }
+    }
+}
+
 pub async fn search_cards(query: &str) -> Result<ScryfallSearchResult, Box<dyn std::error::Error>> {
     let url = format!("{}/cards/search?q={}", SCRYFALL_API, query);
     let resp = client().get(&url).send().await?;
@@ -140,8 +151,7 @@ pub async fn get_all_printings(
         cards.append(&mut data);
         if resp.has_more {
             next = resp.next_page;
-        }
-        if !resp.has_more {
+        } else {
             break;
         }
     }

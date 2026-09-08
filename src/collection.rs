@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const COLLECTION_FILE: &str = "collection.json";
 
@@ -48,7 +48,7 @@ pub struct Collection {
 }
 
 impl Collection {
-    pub fn load(path: &PathBuf) -> Self {
+    pub fn load(path: &Path) -> Self {
         if path.exists() {
             let data = fs::read_to_string(path).expect("Failed to read collection file");
             match serde_json::from_str(&data) {
@@ -60,7 +60,7 @@ impl Collection {
         }
     }
 
-    pub fn save(&self, path: &PathBuf) {
+    pub fn save(&self, path: &Path) {
         let data = serde_json::to_string_pretty(self).expect("Failed to serialize collection");
         fs::write(path, data).expect("Failed to write collection file");
     }
