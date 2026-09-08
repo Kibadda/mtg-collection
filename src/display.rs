@@ -1,6 +1,31 @@
-use crate::collection::Card;
+use crate::collection::{Card, Prices};
 use crate::scryfall::ScryfallCard;
 use console::style;
+
+fn finish_badge(finish: &str) -> String {
+    if finish == "foil" {
+        style("FOIL").bold().magenta().to_string()
+    } else {
+        style("nonfoil").dim().to_string()
+    }
+}
+
+fn price_line(prices: &Prices, finish: &str) -> String {
+    let (usd, eur) = if finish == "foil" {
+        (prices.usd_foil.as_deref(), prices.eur_foil.as_deref())
+    } else {
+        (prices.usd.as_deref(), prices.eur.as_deref())
+    };
+
+    let mut parts = Vec::new();
+    if let Some(u) = usd {
+        parts.push(format!("${}", u));
+    }
+    if let Some(e) = eur {
+        parts.push(format!("€{}", e));
+    }
+    parts.join(" | ")
+}
 
 pub fn print_card(card: &Card) {
     let name = style(&card.name).bold().yellow();
@@ -12,8 +37,13 @@ pub fn print_card(card: &Card) {
     } else {
         String::new()
     };
+    let finish = finish_badge(&card.finish);
+    let cond = style(&card.condition).dim().blue();
 
-    println!("  {} {} | {} | {}{}", name, set, rarity, type_line, qty);
+    println!(
+        "  {} {} | {} | {} [{} {}]{}",
+        name, set, rarity, type_line, finish, cond, qty
+    );
 
     if let Some(ref cost) = card.mana_cost {
         println!("    Mana: {}", cost);
@@ -22,15 +52,9 @@ pub fn print_card(card: &Card) {
         println!("    {}", text);
     }
 
-    let mut prices = Vec::new();
-    if let Some(ref usd) = card.prices.usd {
-        prices.push(format!("${}", usd));
-    }
-    if let Some(ref eur) = card.prices.eur {
-        prices.push(format!("€{}", eur));
-    }
+    let prices = price_line(&card.prices, &card.finish);
     if !prices.is_empty() {
-        println!("    Price: {}", prices.join(" | "));
+        println!("    Price: {}", prices);
     }
 }
 
@@ -56,9 +80,17 @@ pub fn print_search_result(index: usize, card: &ScryfallCard) {
         println!("      {}", text);
     }
 
+    if !card.finishes.is_empty() {
+        let finishes = style(card.finishes.join(", ")).dim();
+        println!("      Finishes: {}", finishes);
+    }
+
     let mut prices = Vec::new();
     if let Some(ref usd) = card.prices.usd {
         prices.push(format!("${}", usd));
+    }
+    if let Some(ref usd_foil) = card.prices.usd_foil {
+        prices.push(format!("${} foil", usd_foil));
     }
     if let Some(ref eur) = card.prices.eur {
         prices.push(format!("€{}", eur));
