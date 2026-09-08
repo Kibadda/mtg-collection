@@ -13,6 +13,14 @@
       };
     in
     {
+      packages.${system}.default = pkgs.rustPlatform.buildRustPackage {
+        pname = "mtg-collection";
+        version = "0.1.0";
+        src = self;
+
+        cargoLock.lockFile = ./Cargo.lock;
+      };
+
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           rustc
