@@ -273,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires network access to api.scryfall.com"]
     fn paper_search_excludes_digital_only_cards() {
         fn total(query: &str) -> u32 {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -337,6 +338,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires network access to api.scryfall.com"]
     fn printings_multi_set() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(search_cards("!Counterspell")).unwrap();
@@ -344,6 +346,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires network access to api.scryfall.com"]
     fn printings_single_set() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt

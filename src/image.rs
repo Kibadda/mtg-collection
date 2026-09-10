@@ -48,6 +48,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires network access to api.scryfall.com"]
     fn real_card_image_fetches_and_decodes() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt

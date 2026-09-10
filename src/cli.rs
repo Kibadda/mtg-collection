@@ -58,6 +58,24 @@ pub enum Commands {
         /// Card name or partial name
         name: Vec<String>,
     },
+    /// Manage the client configuration (e.g. the remote server URL)
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConfigAction {
+    /// Store the URL of the mtg-server that hosts the collection
+    SetServer {
+        /// e.g. http://192.168.1.50:8080
+        url: String,
+    },
+    /// Show the current configuration
+    Show,
+    /// Remove the server URL to fall back to a local collection file
+    Clear,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, ValueEnum)]
@@ -172,5 +190,36 @@ mod tests {
     fn finish_display() {
         assert_eq!(Finish::Foil.to_string(), "foil");
         assert_eq!(Finish::Nonfoil.to_string(), "nonfoil");
+    }
+
+    #[test]
+    fn config_set_server_parses_url() {
+        let Cli { command, .. } = parse(&["config", "set-server", "http://host:8080"]);
+        match command {
+            Commands::Config { action } => match action {
+                ConfigAction::SetServer { url } => assert_eq!(url, "http://host:8080"),
+                other => panic!("unexpected action {other:?}"),
+            },
+            other => panic!("unexpected command {other:?}"),
+        }
+    }
+
+    #[test]
+    fn config_show_and_clear_parse() {
+        let Cli { command, .. } = parse(&["config", "show"]);
+        assert!(matches!(
+            command,
+            Commands::Config {
+                action: ConfigAction::Show
+            }
+        ));
+
+        let Cli { command, .. } = parse(&["config", "clear"]);
+        assert!(matches!(
+            command,
+            Commands::Config {
+                action: ConfigAction::Clear
+            }
+        ));
     }
 }
