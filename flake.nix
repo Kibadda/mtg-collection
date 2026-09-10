@@ -6,36 +6,47 @@
   outputs =
     { self, nixpkgs }:
     let
-      system = "x86_64-linux";
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
 
-      pkgs = import nixpkgs { inherit system; };
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
-      pkg = pkgs.rustPlatform.buildRustPackage {
-        pname = "mtg-collection";
-        version = "0.1.0";
-        src = self;
-
-        cargoLock.lockFile = ./Cargo.lock;
-
-        meta = {
-          description = "Manage your MTG card collection; ships the mtg-collection client and mtg-server";
-          license = pkgs.lib.licenses.mit;
-          mainProgram = "mtg-collection";
-        };
-      };
+      pkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
     in
     {
-      packages.${system} = {
-        default = pkg;
-        server = pkg // {
-          meta = pkg.meta // {
-            mainProgram = "mtg-server";
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor.${system};
+
+          pkg = pkgs.rustPlatform.buildRustPackage {
+            pname = "mtg-collection";
+            version = "0.1.0";
+            src = self;
+
+            cargoLock.lockFile = ./Cargo.lock;
+
+            meta = {
+              description = "Manage your MTG card collection; ships the mtg-collection client and mtg-server";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "mtg-collection";
+            };
           };
-        };
-      };
+        in
+        {
+          default = pkg;
+          server = pkg // {
+            meta = pkg.meta // {
+              mainProgram = "mtg-server";
+            };
+          };
+        }
+      );
 
       nixosModules.default =
-        { config, lib, ... }:
+        { config, lib, pkgs, ... }:
         let
           cfg = config.services.mtg-server;
         in
@@ -45,7 +56,7 @@
 
             package = mkOption {
               type = types.package;
-              default = self.packages.${system}.default;
+              default = self.packages.${pkgs.system}.default;
               description = "Package providing the mtg-server binary.";
             };
 
@@ -91,16 +102,24 @@
           };
         };
 
-      devShells.${system}.default = pkgs.mkShell {
-        buildInputs = with pkgs; [
-          rustc
-          cargo
-          rustfmt
-          clippy
-          rust-analyzer
-        ];
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              rustc
+              cargo
+              rustfmt
+              clippy
+              rust-analyzer
+            ];
 
-        RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
-      };
+            RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
+          };
+        }
+      );
     };
 }
