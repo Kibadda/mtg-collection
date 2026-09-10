@@ -75,11 +75,23 @@
             collectionPath = mkOption {
               type = types.str;
               default = "/var/lib/mtg-collection/collection.json";
-              description = "Collection file the server reads and writes; must live under a StateDirectory the service can write.";
+              description = "Collection file the server reads and writes; its parent directory is created via tmpfiles and owned by the mtg-server user.";
             };
           };
 
           config = lib.mkIf cfg.enable {
+            users.groups.mtg-server = { };
+
+            users.users.mtg-server = {
+              isSystemUser = true;
+              group = "mtg-server";
+              description = "mtg-server daemon user";
+            };
+
+            systemd.tmpfiles.rules = [
+              "d ${lib.dirOf cfg.collectionPath} 0755 mtg-server mtg-server -"
+            ];
+
             systemd.services.mtg-server = {
               description = "mtg-collection remote collection server";
               wantedBy = [ "multi-user.target" ];
@@ -87,14 +99,14 @@
 
               serviceConfig = {
                 Type = "simple";
+                User = "mtg-server";
+                Group = "mtg-server";
                 ExecStart = ''
                   ${cfg.package}/bin/mtg-server \
                     --bind ${cfg.bind} \
                     --port ${toString cfg.port} \
                     --collection ${cfg.collectionPath}
                 '';
-                DynamicUser = true;
-                StateDirectory = "mtg-collection";
                 Restart = "on-failure";
                 RestartSec = "2";
               };
