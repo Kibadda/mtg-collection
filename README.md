@@ -29,6 +29,8 @@ This produces two binaries in `target/release/`:
 
 ### With Nix
 
+Supported on `x86_64-linux` and `aarch64-linux`:
+
 ```console
 $ nix build .#default    # both binaries
 $ nix run .#server       # run mtg-server
@@ -102,11 +104,12 @@ config means local mode.
 ### NixOS module
 
 The flake provides a `nixosModules.default` that runs `mtg-server` as a systemd
-service with a dynamic user and a state directory.
+service under a dedicated system user (`mtg-server`); the collection's parent
+directory is created by systemd-tmpfiles from the `collectionPath` option.
 
 ```nix
 {
-  inputs.mtg-collection.url = "git+https://example.com/you/mtg-collection";
+  inputs.mtg-collection.url = "github:Kibadda/mtg-collection";
 
   outputs = { self, nixpkgs, mtg-collection, ... }: {
     nixosConfigurations.myServer = nixpkgs.lib.nixosSystem {
@@ -132,7 +135,29 @@ service with a dynamic user and a state directory.
 | `services.mtg-server.package` | flake default | Package providing `mtg-server` |
 | `services.mtg-server.bind` | `0.0.0.0` | Address to bind |
 | `services.mtg-server.port` | `8080` | Port |
-| `services.mtg-server.collectionPath` | `/var/lib/mtg-collection/collection.json` | Collection file (must be writable by the dynamic user) |
+| `services.mtg-server.collectionPath` | `/var/lib/mtg-collection/collection.json` | Collection file; its parent dir is created via tmpfiles and owned by the `mtg-server` user |
+
+### Home-manager module
+
+The flake also provides `homeManagerModules.default` for the client. It adds
+`mtg-collection` to `home.packages` and writes
+`~/.config/mtg-collection/config.json` from the `serverUrl` option, so you can
+point the CLI at your `mtg-server` declaratively.
+
+```nix
+{
+  programs.mtg-collection = {
+    enable = true;
+    serverUrl = "http://mtg.internal:8080"; # null/left out → local mode
+  };
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `programs.mtg-collection.enable` | `false` | Install the client and manage its config |
+| `programs.mtg-collection.package` | flake default | Package providing `mtg-collection` and `mtg-server` |
+| `programs.mtg-collection.serverUrl` | `null` | URL of the `mtg-server` to talk to; `null` keeps the collection local |
 
 ## Development
 
