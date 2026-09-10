@@ -102,6 +102,40 @@
           };
         };
 
+      homeManagerModules.default =
+        { config, lib, pkgs, ... }:
+        let
+          cfg = config.programs.mtg-collection;
+          configFile = pkgs.writeText "mtg-collection-config.json" (
+            builtins.toJSON {
+              server_url = cfg.serverUrl;
+            }
+          );
+        in
+        {
+          options.programs.mtg-collection = with lib; {
+            enable = mkEnableOption "the mtg-collection client and its config";
+
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.system}.default;
+              description = "Package providing the mtg-collection and mtg-server binaries.";
+            };
+
+            serverUrl = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "URL of the mtg-server to talk to. null (default) keeps the collection local.";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [ cfg.package ];
+
+            home.file.".config/mtg-collection/config.json".source = configFile;
+          };
+        };
+
       devShells = forAllSystems (
         system:
         let
