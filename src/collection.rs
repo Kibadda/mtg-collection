@@ -9,15 +9,13 @@ pub const DEFAULT_CONDITION: &str = "NM";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Card {
-    pub id: String,
     pub name: String,
+    /// Scryfall set code, e.g. "3ed". Together with `collector_number` this
+    /// uniquely identifies a printing.
     pub set: String,
-    pub set_name: String,
-    pub rarity: String,
-    pub type_line: String,
-    pub mana_cost: Option<String>,
-    pub oracle_text: Option<String>,
-    pub prices: Prices,
+    /// Collector number within the set.
+    #[serde(default)]
+    pub collector_number: String,
     #[serde(default)]
     pub quantity: u32,
     #[serde(default = "default_finish")]
@@ -26,6 +24,18 @@ pub struct Card {
     pub condition: String,
     #[serde(default = "default_lang")]
     pub lang: String,
+}
+
+impl Card {
+    /// Two cards are the same physical printing/finish/condition: the base
+    /// identity (set + collector number) plus the user-chosen finish and
+    /// condition. Language is deliberately not part of the key.
+    pub fn same_printing(&self, other: &Card) -> bool {
+        self.set == other.set
+            && self.collector_number == other.collector_number
+            && self.finish == other.finish
+            && self.condition == other.condition
+    }
 }
 
 fn default_finish() -> String {
@@ -38,14 +48,6 @@ fn default_condition() -> String {
 
 fn default_lang() -> String {
     "en".to_string()
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Prices {
-    pub usd: Option<String>,
-    pub usd_foil: Option<String>,
-    pub eur: Option<String>,
-    pub eur_foil: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,11 +83,7 @@ impl Collection {
     }
 
     pub fn add_card(&mut self, card: Card) {
-        if let Some(existing) = self
-            .cards
-            .iter_mut()
-            .find(|c| c.id == card.id && c.finish == card.finish && c.condition == card.condition)
-        {
+        if let Some(existing) = self.cards.iter_mut().find(|c| c.same_printing(&card)) {
             existing.quantity += card.quantity;
         } else {
             self.cards.push(card);
@@ -93,9 +91,7 @@ impl Collection {
     }
 
     pub fn remove_one(&mut self, card: &Card) -> bool {
-        if let Some(pos) = self.cards.iter().position(|c| {
-            c.id == card.id && c.finish == card.finish && c.condition == card.condition
-        }) {
+        if let Some(pos) = self.cards.iter().position(|c| c.same_printing(card)) {
             if self.cards[pos].quantity > 1 {
                 self.cards[pos].quantity -= 1;
             } else {
@@ -120,22 +116,11 @@ pub fn collection_path() -> PathBuf {
 mod tests {
     use super::*;
 
-    fn card(id: &str, finish: &str, condition: &str, quantity: u32) -> Card {
+    fn card(set: &str, number: &str, finish: &str, condition: &str, quantity: u32) -> Card {
         Card {
-            id: id.to_string(),
             name: "Test Card".to_string(),
-            set: "test".to_string(),
-            set_name: "Test Set".to_string(),
-            rarity: "common".to_string(),
-            type_line: "Instant".to_string(),
-            mana_cost: Some("{R}".to_string()),
-            oracle_text: Some("Text".to_string()),
-            prices: Prices {
-                usd: None,
-                usd_foil: None,
-                eur: None,
-                eur_foil: None,
-            },
+            set: set.to_string(),
+            collector_number: number.to_string(),
             quantity,
             finish: finish.to_string(),
             condition: condition.to_string(),
@@ -146,18 +131,28 @@ mod tests {
     #[test]
     fn add_merges_same_identity() {
         let mut collection = Collection { cards: vec![] };
-        collection.add_card(card("a", "nonfoil", "NM", 2));
-        collection.add_card(card("a", "nonfoil", "NM", 3));
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 2));
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 3));
 
         assert_eq!(collection.cards.len(), 1);
         assert_eq!(collection.cards[0].quantity, 5);
     }
 
     #[test]
+    fn add_separates_different_printings() {
+        let mut collection = Collection { cards: vec![] };
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 2));
+        collection.add_card(card("3ed", "45", "nonfoil", "NM", 1));
+        collection.add_card(card("4ed", "44", "nonfoil", "NM", 1));
+
+        assert_eq!(collection.cards.len(), 3);
+    }
+
+    #[test]
     fn add_separates_different_finish() {
         let mut collection = Collection { cards: vec![] };
-        collection.add_card(card("a", "nonfoil", "NM", 2));
-        collection.add_card(card("a", "foil", "NM", 1));
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 2));
+        collection.add_card(card("3ed", "44", "foil", "NM", 1));
 
         assert_eq!(collection.cards.len(), 2);
         assert_eq!(collection.cards[0].quantity, 2);
@@ -167,8 +162,8 @@ mod tests {
     #[test]
     fn add_separates_different_condition() {
         let mut collection = Collection { cards: vec![] };
-        collection.add_card(card("a", "nonfoil", "NM", 1));
-        collection.add_card(card("a", "nonfoil", "LP", 1));
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 1));
+        collection.add_card(card("3ed", "44", "nonfoil", "LP", 1));
 
         assert_eq!(collection.cards.len(), 2);
     }
@@ -176,7 +171,7 @@ mod tests {
     #[test]
     fn remove_decrements_then_removes() {
         let mut collection = Collection { cards: vec![] };
-        let c = card("a", "nonfoil", "NM", 2);
+        let c = card("3ed", "44", "nonfoil", "NM", 2);
         collection.add_card(c.clone());
 
         assert!(collection.remove_one(&c));
@@ -189,8 +184,8 @@ mod tests {
     #[test]
     fn search_is_case_insensitive_substring() {
         let mut collection = Collection { cards: vec![] };
-        collection.add_card(card("a", "nonfoil", "NM", 1));
-        collection.add_card(card("b", "foil", "NM", 1));
+        collection.add_card(card("3ed", "44", "nonfoil", "NM", 1));
+        collection.add_card(card("3ed", "45", "foil", "NM", 1));
 
         assert_eq!(collection.search("test card").len(), 2);
         assert_eq!(collection.search("TEST").len(), 2);
@@ -198,11 +193,22 @@ mod tests {
     }
 
     #[test]
-    fn lang_defaults_to_english_when_missing() {
-        let json = r#"{"id":"a","name":"X","set":"3ed","set_name":"Set","rarity":"rare","type_line":"Instant","prices":{"usd":null,"usd_foil":null,"eur":null,"eur_foil":null}}"#;
+    fn old_format_still_loads_with_defaults() {
+        let json = r#"{"id":"a","name":"X","set":"3ed","set_name":"Set","rarity":"rare","type_line":"Instant","mana_cost":"{R}","oracle_text":"T","prices":{"usd":null,"usd_foil":null,"eur":null,"eur_foil":null},"quantity":2}"#;
         let card: Card = serde_json::from_str(json).unwrap();
         assert_eq!(card.lang, "en");
         assert_eq!(card.condition, DEFAULT_CONDITION);
         assert_eq!(card.finish, "nonfoil");
+        assert!(card.collector_number.is_empty());
+        assert_eq!(card.quantity, 2);
+    }
+
+    #[test]
+    fn serialization_roundtrip() {
+        let c = card("3ed", "44", "foil", "LP", 4);
+        let json = serde_json::to_string(&c).unwrap();
+        let back: Card = serde_json::from_str(&json).unwrap();
+        assert!(c.same_printing(&back));
+        assert_eq!(back.quantity, 4);
     }
 }

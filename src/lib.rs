@@ -166,16 +166,16 @@ pub async fn run(cli: Cli) {
                 return;
             };
 
-            let card_clone = card.clone();
-            display::print_card(&card_clone);
+            let view = resolve_card_view(card.clone()).await;
+            display::print_card(&view);
 
             if confirm("Remove one copy from your collection?", false) {
-                match store.remove(&card_clone).await {
+                match store.remove(&view.card).await {
                     Ok(true) => println!(
                         "{}",
                         style(format!(
                             "Removed one '{}' [{} {}] from your collection.",
-                            card_clone.name, card_clone.finish, card_clone.condition
+                            view.card.name, view.card.finish, view.card.condition
                         ))
                         .green()
                         .bold()
@@ -184,7 +184,7 @@ pub async fn run(cli: Cli) {
                         "{}",
                         style(format!(
                             "Card not found in collection: '{}'.",
-                            card_clone.name
+                            view.card.name
                         ))
                         .red()
                     ),
@@ -197,7 +197,8 @@ pub async fn run(cli: Cli) {
 
         Commands::List => {
             let collection = load_collection(&store).await;
-            display::print_collection(&collection.cards);
+            let views = resolve_collection_views(collection.cards).await;
+            display::print_collection(&views);
         }
 
         Commands::Show { name } => {
@@ -227,12 +228,13 @@ pub async fn run(cli: Cli) {
                 return;
             };
 
-            if let Ok(scard) = scryfall::get_card(&card.id).await {
-                image::show_card_image(&scard).await;
+            let view = resolve_card_view(card.clone()).await;
+            if let Some(data) = &view.data {
+                image::show_card_image(data).await;
             }
 
             println!();
-            display::print_card(card);
+            display::print_card(&view);
             println!();
         }
     }
@@ -317,9 +319,17 @@ async fn add_flow(store: &store::Store, flow: AddFlow<'_>) {
         None => prompt_condition(),
     };
 
-    let card = card_from_scryfall(picked.card, quantity, picked.finish, condition.clone());
+    let card = card_from_scryfall(
+        picked.card.clone(),
+        quantity,
+        picked.finish.clone(),
+        condition.clone(),
+    );
     println!();
-    display::print_card(&card);
+    display::print_card(&display::CollectionCardView {
+        card: card.clone(),
+        data: Some(picked.card),
+    });
     println!();
 
     if !confirm_add() {
@@ -361,20 +371,81 @@ fn card_from_scryfall(
     condition: String,
 ) -> Card {
     Card {
-        id: card.id,
         name: card.name,
         set: card.set,
-        set_name: card.set_name,
-        rarity: card.rarity,
-        type_line: card.type_line,
-        mana_cost: card.mana_cost,
-        oracle_text: card.oracle_text,
-        prices: card.prices.into(),
+        collector_number: card.collector_number,
         quantity,
         finish,
         condition,
         lang: card.lang.unwrap_or_else(|| "en".to_string()),
     }
+}
+
+/// Key set + collector number so fetched display data can be matched back
+/// onto stored collection entries (which may share a printing across finish
+/// variants).
+fn card_key(set: &str, number: &str) -> String {
+    format!("{set}:{number}")
+}
+
+/// Fetch the live Scryfall data for every stored card (bulk, batching up to 75
+/// printings per request) and attach it to each entry. Entries that cannot be
+/// resolved get `data: None` and are rendered as a placeholder.
+async fn resolve_collection_views(cards: Vec<Card>) -> Vec<display::CollectionCardView> {
+    let identifiers: Vec<scryfall::CardIdentifier> = cards
+        .iter()
+        .filter(|c| !c.collector_number.is_empty())
+        .map(|c| scryfall::CardIdentifier {
+            set: c.set.clone(),
+            collector_number: c.collector_number.clone(),
+        })
+        .collect();
+
+    let data = match scryfall::get_cards_by_identifiers(&identifiers).await {
+        Ok(result) => {
+            if !result.not_found.is_empty() {
+                println!(
+                    "{}",
+                    style(format!(
+                        "{} card(s) could not be resolved on Scryfall.",
+                        result.not_found.len()
+                    ))
+                    .yellow()
+                );
+            }
+            result.data
+        }
+        Err(e) => {
+            println!(
+                "{}",
+                style(format!("Could not fetch card details from Scryfall: {e}")).yellow()
+            );
+            Vec::new()
+        }
+    };
+
+    let by_key: std::collections::HashMap<String, ScryfallCard> = data
+        .into_iter()
+        .map(|c| (card_key(&c.set, &c.collector_number), c))
+        .collect();
+
+    cards
+        .into_iter()
+        .map(|card| {
+            let data = by_key
+                .get(&card_key(&card.set, &card.collector_number))
+                .cloned();
+            display::CollectionCardView { card, data }
+        })
+        .collect()
+}
+
+async fn resolve_card_view(card: Card) -> display::CollectionCardView {
+    resolve_collection_views(vec![card])
+        .await
+        .into_iter()
+        .next()
+        .expect("resolving one card yields one view")
 }
 
 async fn pick_scryfall_card(
@@ -608,8 +679,14 @@ fn select_collection_card<'a>(cards: Vec<&'a Card>, prompt: &str) -> Option<&'a 
                 format!(" ({})", c.lang)
             };
             format!(
-                "{} [{} {}]{} x{} | {}",
-                c.name, c.finish, c.condition, lang, c.quantity, c.set_name
+                "{} [{} {}]{} x{} | {} #{}",
+                c.name,
+                c.finish,
+                c.condition,
+                lang,
+                c.quantity,
+                c.set.to_uppercase(),
+                c.collector_number
             )
         })
         .collect();
@@ -831,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn card_from_scryfall_maps_fields_and_prices() {
+    fn card_from_scryfall_stores_only_identifying_fields() {
         let card = card_from_scryfall(
             scard("id-1", "3ed", "44", &["nonfoil", "foil"], false),
             2,
@@ -839,15 +916,13 @@ mod tests {
             "LP".to_string(),
         );
 
-        assert_eq!(card.id, "id-1");
         assert_eq!(card.name, "Test Card");
         assert_eq!(card.set, "3ed");
+        assert_eq!(card.collector_number, "44");
         assert_eq!(card.quantity, 2);
         assert_eq!(card.finish, "foil");
         assert_eq!(card.condition, "LP");
         assert_eq!(card.lang, "en");
-        assert_eq!(card.prices.usd.as_deref(), Some("1.00"));
-        assert_eq!(card.prices.eur_foil.as_deref(), Some("2.50"));
     }
 
     #[test]
@@ -859,6 +934,12 @@ mod tests {
             "NM".to_string(),
         );
         assert_eq!(card.lang, "de");
+    }
+
+    #[test]
+    fn card_key_matches_by_set_and_number() {
+        assert_eq!(card_key("3ed", "44"), "3ed:44");
+        assert_eq!(card_key("ltr", "103s"), "ltr:103s");
     }
 
     #[test]

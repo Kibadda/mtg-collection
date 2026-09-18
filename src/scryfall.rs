@@ -1,5 +1,5 @@
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT as USER_AGENT_HEADER};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const SCRYFALL_API: &str = "https://api.scryfall.com";
 const APP_USER_AGENT: &str = "mtg-collection/0.1.0 (personal collection tool)";
@@ -104,15 +104,71 @@ pub struct ScryfallPrices {
     pub eur_foil: Option<String>,
 }
 
-impl From<ScryfallPrices> for crate::collection::Prices {
-    fn from(p: ScryfallPrices) -> Self {
-        Self {
-            usd: p.usd,
-            usd_foil: p.usd_foil,
-            eur: p.eur,
-            eur_foil: p.eur_foil,
+/// Identifies a printing to the Scryfall collection endpoint
+/// (`POST /cards/collection`), which accepts set + collector number as a
+/// globally-unique identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardIdentifier {
+    #[serde(default)]
+    pub set: String,
+    #[serde(default)]
+    pub collector_number: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScryfallCollectionResult {
+    #[serde(default)]
+    pub not_found: Vec<CardIdentifier>,
+    #[serde(default)]
+    pub has_more: bool,
+    #[serde(default)]
+    pub next_page: Option<String>,
+    pub data: Vec<ScryfallCard>,
+}
+
+/// Bulk-fetch cards by set + collector number via the collection endpoint
+/// (up to 75 identifiers per request, following pagination). Returns every
+/// matched card plus the identifiers that had no match.
+pub async fn get_cards_by_identifiers(
+    identifiers: &[CardIdentifier],
+) -> Result<ScryfallCollectionResult, Box<dyn std::error::Error>> {
+    let client = client();
+    let mut result = ScryfallCollectionResult {
+        not_found: Vec::new(),
+        has_more: false,
+        next_page: None,
+        data: Vec::new(),
+    };
+
+    for chunk in identifiers.chunks(75) {
+        let body = serde_json::json!({ "identifiers": chunk });
+        let resp = client
+            .post(format!("{SCRYFALL_API}/cards/collection"))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<ScryfallCollectionResult>()
+            .await?;
+        result.data.extend(resp.data);
+        result.not_found.extend(resp.not_found);
+
+        let mut next = if resp.has_more { resp.next_page } else { None };
+        while let Some(url) = next {
+            let page = client
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<ScryfallCollectionResult>()
+                .await?;
+            result.data.extend(page.data);
+            result.not_found.extend(page.not_found);
+            next = if page.has_more { page.next_page } else { None };
         }
     }
+
+    Ok(result)
 }
 
 pub async fn search_cards(query: &str) -> Result<ScryfallSearchResult, Box<dyn std::error::Error>> {
@@ -127,20 +183,6 @@ pub async fn search_cards(query: &str) -> Result<ScryfallSearchResult, Box<dyn s
     let resp = resp
         .error_for_status()?
         .json::<ScryfallSearchResult>()
-        .await?;
-    Ok(resp)
-}
-
-/// Fetch a single card by its Scryfall id, e.g. to look up image URLs for a
-/// card already stored in the collection.
-pub async fn get_card(id: &str) -> Result<ScryfallCard, Box<dyn std::error::Error>> {
-    let url = format!("{}/cards/{}", SCRYFALL_API, id);
-    let resp = client()
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<ScryfallCard>()
         .await?;
     Ok(resp)
 }
@@ -287,6 +329,18 @@ mod tests {
         assert!(total(&default_query(name, false, false)) > 0);
         assert_eq!(total(&default_query(name, true, true)), 0);
         assert_eq!(total(&default_query(name, true, false)), 0);
+    }
+
+    #[test]
+    fn card_identifier_serializes_for_collection_endpoint() {
+        let id = CardIdentifier {
+            set: "3ed".to_string(),
+            collector_number: "123".to_string(),
+        };
+        let body = serde_json::json!({ "identifiers": [id] });
+        let expected =
+            serde_json::json!({ "identifiers": [{ "set": "3ed", "collector_number": "123" }] });
+        assert_eq!(body, expected);
     }
 
     #[test]

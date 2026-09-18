@@ -117,7 +117,6 @@ async fn health() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collection::Prices;
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
@@ -125,20 +124,9 @@ mod tests {
 
     fn card(id: &str, quantity: u32, name: &str) -> Card {
         Card {
-            id: id.to_string(),
             name: name.to_string(),
-            set: "test".to_string(),
-            set_name: "Test Set".to_string(),
-            rarity: "common".to_string(),
-            type_line: "Instant".to_string(),
-            mana_cost: Some("{R}".to_string()),
-            oracle_text: Some("Text".to_string()),
-            prices: Prices {
-                usd: None,
-                usd_foil: None,
-                eur: None,
-                eur_foil: None,
-            },
+            set: "3ed".to_string(),
+            collector_number: id.to_string(),
             quantity,
             finish: "nonfoil".to_string(),
             condition: "NM".to_string(),

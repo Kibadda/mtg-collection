@@ -92,24 +92,12 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collection::Prices;
 
     fn card(id: &str, quantity: u32) -> Card {
         Card {
-            id: id.to_string(),
             name: "Test Card".to_string(),
-            set: "test".to_string(),
-            set_name: "Test Set".to_string(),
-            rarity: "common".to_string(),
-            type_line: "Instant".to_string(),
-            mana_cost: Some("{R}".to_string()),
-            oracle_text: Some("Text".to_string()),
-            prices: Prices {
-                usd: None,
-                usd_foil: None,
-                eur: None,
-                eur_foil: None,
-            },
+            set: "3ed".to_string(),
+            collector_number: id.to_string(),
             quantity,
             finish: "nonfoil".to_string(),
             condition: "NM".to_string(),
