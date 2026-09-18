@@ -69,13 +69,13 @@ The `mtg-server` binary hosts the collection over plain HTTP. Run it on the
 machine you want to keep the collection on.
 
 ```console
-$ mtg-server --bind 0.0.0.0 --port 8080 --collection /path/to/collection.json
-mtg-server listening on 0.0.0.0:8080
+$ mtg-server --port 8080 --collection /path/to/collection.json
+mtg-server listening on 127.0.0.1:8080
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--bind` | `0.0.0.0` | Address to bind to |
+| `--bind` | `127.0.0.1` | Address to bind to |
 | `--port` | `8080` | Port to listen on |
 | `--collection` | `~/.mtg-collection/collection.json` | Collection file to read/write |
 
@@ -133,7 +133,7 @@ directory is created by systemd-tmpfiles from the `collectionPath` option.
         {
           services.mtg-server = {
             enable = true;
-            # bind = "0.0.0.0";
+            # bind = "127.0.0.1";
             # port = 8080;
             # collectionPath = "/var/lib/mtg-collection/collection.json";
           };
@@ -148,7 +148,7 @@ directory is created by systemd-tmpfiles from the `collectionPath` option.
 |---|---|---|
 | `services.mtg-server.enable` | `false` | Enable the systemd unit |
 | `services.mtg-server.package` | flake default | Package providing `mtg-server` |
-| `services.mtg-server.bind` | `0.0.0.0` | Address to bind |
+| `services.mtg-server.bind` | `127.0.0.1` | Address to bind to |
 | `services.mtg-server.port` | `8080` | Port |
 | `services.mtg-server.collectionPath` | `/var/lib/mtg-collection/collection.json` | Collection file; its parent dir is created via tmpfiles and owned by the `mtg-server` user |
 

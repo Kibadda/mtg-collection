@@ -15,9 +15,9 @@ use tokio::sync::Mutex;
 #[derive(Debug, Parser)]
 #[command(name = "mtg-server", about = "Host your MTG collection over HTTP")]
 pub struct ServerArgs {
-    /// Address to bind to. Defaults to all interfaces so the client on another
-    /// PC can reach it over your LAN.
-    #[arg(long, default_value = "0.0.0.0")]
+    /// Address to bind to. Defaults to loopback, so only this machine can reach
+    /// the server.
+    #[arg(long, default_value = "127.0.0.1")]
     pub bind: String,
     /// Port to listen on.
     #[arg(long, default_value_t = 8080)]
