@@ -480,9 +480,35 @@ async fn pick_scryfall_card(
     };
 
     match card {
+        Some(c) if query_pins_exact_printing(query) => Some(PickedCard {
+            finish: finish_flag
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| prompt_finish(&c.finishes)),
+            card: c,
+        }),
         Some(c) => select_printing(c, scope, set_code, finish_flag).await,
         None => None,
     }
+}
+
+/// Whether a search query already identifies an exact printing via a set code
+/// plus a collector number (e.g. `set:fdn cn:1` or `s:mkm cn:59`). Such
+/// queries resolve to a single printing, so no printing selection is needed.
+fn query_pins_exact_printing(query: &str) -> bool {
+    let mut has_set = false;
+    let mut has_cn = false;
+    for token in query.split_whitespace() {
+        let lower = token.to_ascii_lowercase();
+        if lower.starts_with('-') {
+            continue;
+        }
+        if lower.starts_with("set:") || lower.starts_with("s:") || lower.starts_with("e:") {
+            has_set = true;
+        } else if lower.starts_with("cn:") {
+            has_cn = true;
+        }
+    }
+    has_set && has_cn
 }
 
 /// A resolved card: the exact printing plus the chosen finish string.
@@ -946,6 +972,19 @@ mod tests {
     #[test]
     fn prompt_language_defaults_to_german_for_german_printing() {
         assert_eq!(prompt_language(Some("de")), "de");
+    }
+
+    #[test]
+    fn query_pins_exact_printing_detects_set_and_collector_number() {
+        assert!(query_pins_exact_printing("set:fdn cn:1"));
+        assert!(query_pins_exact_printing("s:mkm cn:59"));
+        assert!(query_pins_exact_printing("e:fnd cn:\"59\""));
+
+        assert!(!query_pins_exact_printing("Lightning Bolt"));
+        assert!(!query_pins_exact_printing("set:fdn"));
+        assert!(!query_pins_exact_printing("cn:1"));
+        assert!(!query_pins_exact_printing("-s:fdn cn:1"));
+        assert!(!query_pins_exact_printing("\"s:fdn cn:1\""));
     }
 
     #[test]
