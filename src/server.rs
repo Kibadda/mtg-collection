@@ -1,7 +1,8 @@
 use crate::collection::{Card, Collection};
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::Html;
+use axum::http::header::{self, HeaderValue};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
@@ -104,6 +105,8 @@ struct SearchParams {
 pub fn router(state: SharedState) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/style.css", get(stylesheet))
+        .route("/app.js", get(script))
         .route("/cards", get(list_cards).post(add_card))
         .route("/cards/search", get(search_cards))
         .route("/cards/remove", post(remove_card))
@@ -175,6 +178,25 @@ async fn index() -> Html<&'static str> {
     Html(include_str!("../web/index.html"))
 }
 
+fn static_asset(content_type: &'static str, body: &'static str) -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    (headers, body)
+}
+
+/// The dashboard stylesheet, embedded so the server stays a single binary.
+async fn stylesheet() -> impl IntoResponse {
+    static_asset("text/css; charset=utf-8", include_str!("../web/style.css"))
+}
+
+/// The dashboard script, embedded so the server stays a single binary.
+async fn script() -> impl IntoResponse {
+    static_asset(
+        "application/javascript; charset=utf-8",
+        include_str!("../web/app.js"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,7 +258,27 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let html = std::str::from_utf8(&body).unwrap();
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("scryfall.com/cards/collection"));
+        assert!(html.contains("style.css"));
+        assert!(html.contains("app.js"));
+    }
+
+    #[tokio::test]
+    async fn dashboard_assets_are_served() {
+        let (app, _) = app().await;
+        for (uri, expected) in [
+            ("/style.css", ":root"),
+            ("/app.js", "scryfall.com/cards/collection"),
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "GET {uri}");
+            let body = resp.into_body().collect().await.unwrap().to_bytes();
+            let text = std::str::from_utf8(&body).unwrap();
+            assert!(text.contains(expected), "GET {uri} missing {expected:?}");
+        }
     }
 
     #[tokio::test]
