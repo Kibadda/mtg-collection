@@ -290,36 +290,30 @@ struct AddFlow<'a> {
     verbose: bool,
 }
 
-/// One add operation: search-and-pick the card, resolve quantity, condition
-/// and language, then confirm and store. Finish is resolved while picking the
-/// printing.
+/// One add operation: search-and-pick the printing, then resolve finish,
+/// quantity, condition and language, confirm and store.
 async fn add_flow(store: &store::Store, flow: AddFlow<'_>) {
-    let Some(picked) =
+    let Some(scard) =
         pick_scryfall_card(flow.query, flow.scope, flow.set_code, flow.finish_flag).await
     else {
         return;
     };
 
-    image::show_card_image(&picked.card).await;
+    image::show_card_image(&scard).await;
 
+    let finish = resolve_finish(&scard, flow.finish_flag);
     let quantity = flow.count.unwrap_or_else(prompt_quantity);
     let condition = match flow.condition {
         Some(c) => c,
         None => prompt_condition(),
     };
-    let lang = prompt_language(picked.card.lang.as_deref());
+    let lang = prompt_language(scard.lang.as_deref());
 
-    let card = card_from_scryfall(
-        picked.card.clone(),
-        quantity,
-        picked.finish.clone(),
-        condition.clone(),
-        lang,
-    );
+    let card = card_from_scryfall(scard.clone(), quantity, finish, condition.clone(), lang);
     println!();
     display::print_card(&display::CollectionCardView {
         card: card.clone(),
-        data: Some(picked.card),
+        data: Some(scard),
     });
     println!();
 
@@ -445,7 +439,7 @@ async fn pick_scryfall_card(
     scope: Scope,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
-) -> Option<PickedCard> {
+) -> Option<ScryfallCard> {
     let q = scryfall::default_query(query, scope.paper_only, scope.exclude_promos);
     let card = match scryfall::search_cards(&q).await {
         Ok(result) if !result.data.is_empty() => {
@@ -480,12 +474,7 @@ async fn pick_scryfall_card(
     };
 
     match card {
-        Some(c) if query_pins_exact_printing(query) => Some(PickedCard {
-            finish: finish_flag
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| prompt_finish(&c.finishes)),
-            card: c,
-        }),
+        Some(c) if query_pins_exact_printing(query) => Some(c),
         Some(c) => select_printing(c, scope, set_code, finish_flag).await,
         None => None,
     }
@@ -511,10 +500,21 @@ fn query_pins_exact_printing(query: &str) -> bool {
     has_set && has_cn
 }
 
-/// A resolved card: the exact printing plus the chosen finish string.
-struct PickedCard {
-    card: ScryfallCard,
-    finish: String,
+/// Resolve the finish for the chosen printing: use the flag, or prompt over
+/// the printing's own finishes.
+fn resolve_finish(card: &ScryfallCard, finish_flag: Option<&str>) -> String {
+    match finish_flag {
+        Some(f) => {
+            if !card.finishes.iter().any(|x| x == f) {
+                println!(
+                    "{}",
+                    style(format!("Finish '{}' not printed for this card.", f)).yellow()
+                );
+            }
+            f.to_string()
+        }
+        None => prompt_finish(&card.finishes),
+    }
 }
 
 /// Printings deduped by set + collector number so each printing is a single
@@ -533,16 +533,15 @@ fn distinct_printings(prints: &[ScryfallCard], exclude_promos: bool) -> Vec<&Scr
     rows
 }
 
-/// After a card name has been chosen:
-/// 1. pick which exact printing to add (prompt, or filtered by `set_code`),
-/// 2. resolve the finish (flag, or prompt from that printing's own finishes),
-/// 3. return that printing plus the chosen finish.
+/// After a card name has been chosen, pick which exact printing to add
+/// (prompt, or filtered by `set_code`). `finish_flag` only influences which
+/// printing row is pre-selected; the finish itself is resolved afterwards.
 async fn select_printing(
     card: ScryfallCard,
     scope: Scope,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
-) -> Option<PickedCard> {
+) -> Option<ScryfallCard> {
     let prints = match scryfall::get_all_printings(&card, scope.paper_only).await {
         Ok(p) => p,
         Err(e) => {
@@ -552,10 +551,7 @@ async fn select_printing(
                 e,
                 style("(using the selected card anyway)").dim()
             );
-            let finish = finish_flag
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| prompt_finish(&card.finishes));
-            return Some(PickedCard { card, finish });
+            return Some(card);
         }
     };
 
@@ -622,30 +618,10 @@ async fn select_printing(
         }
     };
 
-    let Some(chosen_print) = chosen else {
-        let finish = finish_flag
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| prompt_finish(&card.finishes));
-        return Some(PickedCard { card, finish });
-    };
-
-    let finish = match finish_flag {
-        Some(f) => {
-            if !chosen_print.finishes.iter().any(|x| x == f) {
-                println!(
-                    "{}",
-                    style(format!("Finish '{}' not printed for this card.", f)).yellow()
-                );
-            }
-            f.to_string()
-        }
-        None => prompt_finish(&chosen_print.finishes),
-    };
-
-    Some(PickedCard {
-        card: chosen_print.clone(),
-        finish,
-    })
+    match chosen {
+        Some(print) => Some(print.clone()),
+        None => Some(card),
+    }
 }
 
 fn printing_label(c: &ScryfallCard) -> String {
