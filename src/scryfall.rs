@@ -224,9 +224,37 @@ pub struct ScryfallList {
     pub data: Vec<ScryfallCard>,
 }
 
+/// Return a copy of a Scryfall search URI with `lang:<lang>` appended to its
+/// `q` parameter, so the list returns one card object per printing instead of
+/// one per language variant. URIs without a `q` parameter are returned
+/// unchanged.
+fn with_lang(uri: &str, lang: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut url = url::Url::parse(uri)?;
+    let mut pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+
+    let Some((_, q)) = pairs.iter_mut().find(|(k, _)| k == "q") else {
+        return Ok(uri.to_string());
+    };
+    if !q.to_ascii_lowercase().contains("lang:") {
+        q.push(' ');
+        q.push_str(&format!("lang:{lang}"));
+    }
+
+    url.set_query(None);
+    for (k, v) in pairs {
+        url.query_pairs_mut().append_pair(&k, &v);
+    }
+    Ok(url.to_string())
+}
+
 /// Fetch all printings (all sets) of a card via its prints_search_uri,
-/// following pagination. When `paper_only` is set, digital-only prints are
-/// dropped.
+/// following pagination. The search is narrowed to `lang:en` so each printing
+/// (set + collector number) appears exactly once; language variants collapse
+/// into that single English card object. When `paper_only` is set, digital-only
+/// prints are dropped.
 pub async fn get_all_printings(
     card: &ScryfallCard,
     paper_only: bool,
@@ -240,7 +268,7 @@ pub async fn get_all_printings(
     };
 
     let mut cards = Vec::new();
-    let mut next: Option<String> = Some(uri);
+    let mut next: Option<String> = Some(with_lang(&uri, "en")?);
     for _ in 0..200 {
         let Some(url) = next.take() else {
             break;
@@ -329,6 +357,30 @@ mod tests {
         assert!(total(&default_query(name, false, false)) > 0);
         assert_eq!(total(&default_query(name, true, true)), 0);
         assert_eq!(total(&default_query(name, true, false)), 0);
+    }
+
+    #[test]
+    fn with_lang_appends_to_q_or_adds_nothing_when_already_set() {
+        let uri =
+            "https://api.scryfall.com/cards/search?order=released&q=oracleid%3Aabc&unique=prints";
+        let out = with_lang(uri, "en").unwrap();
+        let url = url::Url::parse(&out).unwrap();
+        let q = url.query_pairs().find(|(k, _)| k == "q").unwrap().1;
+        assert!(q.contains("oracleid:abc"));
+        assert!(q.contains("lang:en"));
+
+        let already = "https://api.scryfall.com/cards/search?q=oracleid%3Aabc%20lang%3Ade";
+        let out = with_lang(already, "en").unwrap();
+        let url = url::Url::parse(&out).unwrap();
+        let q = url.query_pairs().find(|(k, _)| k == "q").unwrap().1;
+        assert!(q.contains("lang:de"));
+        assert!(!q.contains("lang:en"));
+    }
+
+    #[test]
+    fn with_lang_leaves_urls_without_query_untouched() {
+        let uri = "https://api.scryfall.com/cards/4ae21c9e";
+        assert_eq!(with_lang(uri, "en").unwrap(), uri);
     }
 
     #[test]

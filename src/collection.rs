@@ -27,14 +27,15 @@ pub struct Card {
 }
 
 impl Card {
-    /// Two cards are the same physical printing/finish/condition: the base
-    /// identity (set + collector number) plus the user-chosen finish and
-    /// condition. Language is deliberately not part of the key.
+    /// Two cards are the same physical copy to merge: the base identity
+    /// (set + collector number) plus the user-chosen finish, condition and
+    /// language.
     pub fn same_printing(&self, other: &Card) -> bool {
         self.set == other.set
             && self.collector_number == other.collector_number
             && self.finish == other.finish
             && self.condition == other.condition
+            && self.lang == other.lang
     }
 }
 
@@ -166,6 +167,24 @@ mod tests {
         collection.add_card(card("3ed", "44", "nonfoil", "LP", 1));
 
         assert_eq!(collection.cards.len(), 2);
+    }
+
+    #[test]
+    fn add_separates_different_language() {
+        let mut collection = Collection { cards: vec![] };
+        let mut en = card("3ed", "44", "nonfoil", "NM", 1);
+        let mut de = en.clone();
+        de.lang = "de".to_string();
+        en.quantity = 2;
+
+        collection.add_card(en);
+        collection.add_card(de);
+
+        assert_eq!(collection.cards.len(), 2);
+        assert_eq!(collection.cards[0].lang, "en");
+        assert_eq!(collection.cards[0].quantity, 2);
+        assert_eq!(collection.cards[1].lang, "de");
+        assert_eq!(collection.cards[1].quantity, 1);
     }
 
     #[test]

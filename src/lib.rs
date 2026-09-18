@@ -82,14 +82,12 @@ pub async fn run(cli: Cli) {
             };
 
             let finish_flag = finish.map(|f| f.to_string());
-            let lang = prompt_language();
 
             add_flow(
                 &store,
                 AddFlow {
                     scope,
                     query: &q,
-                    lang,
                     set_code: set.as_deref(),
                     finish_flag: finish_flag.as_deref(),
                     count,
@@ -101,8 +99,6 @@ pub async fn run(cli: Cli) {
         }
 
         Commands::AddMany { set } => {
-            let lang = prompt_language();
-
             println!(
                 "{}",
                 style("Adding session started. Search for cards, or press Enter to quit.").bold()
@@ -127,7 +123,6 @@ pub async fn run(cli: Cli) {
                     AddFlow {
                         scope,
                         query: &q,
-                        lang: lang.clone(),
                         set_code: set.as_deref(),
                         finish_flag: None,
                         count: None,
@@ -288,7 +283,6 @@ struct Scope {
 struct AddFlow<'a> {
     scope: Scope,
     query: &'a str,
-    lang: String,
     set_code: Option<&'a str>,
     finish_flag: Option<&'a str>,
     count: Option<u32>,
@@ -296,17 +290,12 @@ struct AddFlow<'a> {
     verbose: bool,
 }
 
-/// One add operation: search-and-pick the card, resolve quantity, finish and
-/// condition, then confirm and store.
+/// One add operation: search-and-pick the card, resolve quantity, condition
+/// and language, then confirm and store. Finish is resolved while picking the
+/// printing.
 async fn add_flow(store: &store::Store, flow: AddFlow<'_>) {
-    let Some(picked) = pick_scryfall_card(
-        flow.query,
-        flow.scope,
-        &flow.lang,
-        flow.set_code,
-        flow.finish_flag,
-    )
-    .await
+    let Some(picked) =
+        pick_scryfall_card(flow.query, flow.scope, flow.set_code, flow.finish_flag).await
     else {
         return;
     };
@@ -318,12 +307,14 @@ async fn add_flow(store: &store::Store, flow: AddFlow<'_>) {
         Some(c) => c,
         None => prompt_condition(),
     };
+    let lang = prompt_language(picked.card.lang.as_deref());
 
     let card = card_from_scryfall(
         picked.card.clone(),
         quantity,
         picked.finish.clone(),
         condition.clone(),
+        lang,
     );
     println!();
     display::print_card(&display::CollectionCardView {
@@ -369,6 +360,7 @@ fn card_from_scryfall(
     quantity: u32,
     finish: String,
     condition: String,
+    lang: String,
 ) -> Card {
     Card {
         name: card.name,
@@ -377,7 +369,7 @@ fn card_from_scryfall(
         quantity,
         finish,
         condition,
-        lang: card.lang.unwrap_or_else(|| "en".to_string()),
+        lang,
     }
 }
 
@@ -451,14 +443,10 @@ async fn resolve_card_view(card: Card) -> display::CollectionCardView {
 async fn pick_scryfall_card(
     query: &str,
     scope: Scope,
-    lang: &str,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
 ) -> Option<PickedCard> {
-    let mut q = scryfall::default_query(query, scope.paper_only, scope.exclude_promos);
-    if !q.to_ascii_lowercase().contains("lang:") {
-        q.push_str(&format!(" lang:{lang}"));
-    }
+    let q = scryfall::default_query(query, scope.paper_only, scope.exclude_promos);
     let card = match scryfall::search_cards(&q).await {
         Ok(result) if !result.data.is_empty() => {
             if result.data.len() == 1 {
@@ -492,7 +480,7 @@ async fn pick_scryfall_card(
     };
 
     match card {
-        Some(c) => select_printing(c, scope, lang, set_code, finish_flag).await,
+        Some(c) => select_printing(c, scope, set_code, finish_flag).await,
         None => None,
     }
 }
@@ -503,21 +491,16 @@ struct PickedCard {
     finish: String,
 }
 
-fn in_language(card: &ScryfallCard, lang: &str) -> bool {
-    card.lang.as_deref().unwrap_or("en") == lang
-}
-
-/// Printings in the requested language, deduped by card id (each printing is
-/// its own choice). Promo printings are dropped when `exclude_promos` is set.
-fn distinct_printings<'a>(
-    prints: &'a [ScryfallCard],
-    lang: &str,
-    exclude_promos: bool,
-) -> Vec<&'a ScryfallCard> {
+/// Printings deduped by set + collector number so each printing is a single
+/// choice regardless of language; the `lang:en` fetch upstream already
+/// collapses language variants. Promo printings are dropped when
+/// `exclude_promos` is set.
+fn distinct_printings(prints: &[ScryfallCard], exclude_promos: bool) -> Vec<&ScryfallCard> {
     let mut seen = std::collections::HashSet::new();
     let mut rows = Vec::new();
     for c in prints {
-        if in_language(c, lang) && seen.insert(&c.id) && !(exclude_promos && c.promo) {
+        let key = (c.set.as_str(), c.collector_number.as_str());
+        if seen.insert(key) && !(exclude_promos && c.promo) {
             rows.push(c);
         }
     }
@@ -531,7 +514,6 @@ fn distinct_printings<'a>(
 async fn select_printing(
     card: ScryfallCard,
     scope: Scope,
-    lang: &str,
     set_code: Option<&str>,
     finish_flag: Option<&str>,
 ) -> Option<PickedCard> {
@@ -551,8 +533,9 @@ async fn select_printing(
         }
     };
 
-    // Printings in the requested language, deduped by card id.
-    let rows = distinct_printings(&prints, lang, scope.exclude_promos);
+    // One row per printing (set + collector number); language is not part of
+    // the choice, it is resolved separately as metadata.
+    let rows = distinct_printings(&prints, scope.exclude_promos);
 
     // Narrow to the forced set if `--set <CODE>` was given; fall back to all
     // printings (with a warning) when the card has none in that set.
@@ -732,12 +715,17 @@ fn prompt_condition() -> String {
         .unwrap_or_else(|| DEFAULT_CONDITION.to_string())
 }
 
-/// Languages offered when adding a card. The first entry is the default.
+/// Languages offered when adding a card.
 const LANGUAGES: [(&str, &str); 2] = [("English", "en"), ("German", "de")];
 
-fn prompt_language() -> String {
+/// Ask for the language of the copy being added. `default` is the language of
+/// the printing that was picked, so the common case is just hitting Enter.
+fn prompt_language(default: Option<&str>) -> String {
     let items: Vec<String> = LANGUAGES.iter().map(|(name, _)| name.to_string()).collect();
-    let idx = plain_pick("Language", &items, 0).unwrap_or(0);
+    let default_idx = default
+        .and_then(|l| LANGUAGES.iter().position(|(_, code)| *code == l))
+        .unwrap_or(0);
+    let idx = plain_pick("Language", &items, default_idx).unwrap_or(default_idx);
     LANGUAGES[idx].1.to_string()
 }
 
@@ -857,29 +845,17 @@ mod tests {
     }
 
     #[test]
-    fn distinct_printings_dedupes_by_id_and_skips_other_languages() {
+    fn distinct_printings_keeps_one_row_per_printing_not_per_language() {
         let prints = vec![
-            scard("a", "hoc", "19", &["nonfoil", "foil"], false),
-            scard("b", "hoc", "59", &["foil"], false),
-            scard("a", "hoc", "19", &["nonfoil", "foil"], false),
-            non_english("c"),
+            scard("en-19", "hoc", "19", &["nonfoil", "foil"], false),
+            scard("de-19", "hoc", "19", &["nonfoil", "foil"], false),
+            scard("jp-19", "hoc", "19", &["nonfoil", "foil"], false),
+            scard("de-59", "hoc", "59", &["foil"], false),
         ];
-        let rows = distinct_printings(&prints, "en", false);
+        let rows = distinct_printings(&prints, false);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].collector_number, "19");
         assert_eq!(rows[1].collector_number, "59");
-    }
-
-    #[test]
-    fn distinct_printings_keeps_requested_language() {
-        let prints = vec![
-            scard("a", "hoc", "1", &["nonfoil"], false),
-            non_english("c"),
-        ];
-        let de = distinct_printings(&prints, "de", false);
-        assert_eq!(de.len(), 1);
-        assert_eq!(de[0].lang.as_deref(), Some("de"));
-        assert_eq!(de[0].id, "c");
     }
 
     #[test]
@@ -888,11 +864,11 @@ mod tests {
             scard("a", "ltr", "103", &["nonfoil", "foil"], false),
             scard("b", "pltr", "103s", &["foil"], true),
         ];
-        let rows = distinct_printings(&prints, "en", true);
+        let rows = distinct_printings(&prints, true);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].set, "ltr");
 
-        let all = distinct_printings(&prints, "en", false);
+        let all = distinct_printings(&prints, false);
         assert_eq!(all.len(), 2);
     }
 
@@ -901,6 +877,7 @@ mod tests {
         let label = printing_label(&scard("a", "hoc", "59", &["foil"], false));
         assert!(label.contains("(HOC 59)"));
         assert!(label.contains("[foil]"));
+        assert!(!label.contains("(en)"));
 
         let bare = printing_label(&scard("b", "ltr", "", &[], false));
         assert!(bare.contains("(LTR)"));
@@ -914,6 +891,7 @@ mod tests {
             2,
             "foil".to_string(),
             "LP".to_string(),
+            "en".to_string(),
         );
 
         assert_eq!(card.name, "Test Card");
@@ -926,14 +904,24 @@ mod tests {
     }
 
     #[test]
-    fn card_from_scryfall_stores_language() {
+    fn card_from_scryfall_stores_prompted_language() {
         let card = card_from_scryfall(
             non_english("id-9"),
             1,
             "nonfoil".to_string(),
             "NM".to_string(),
+            "de".to_string(),
         );
         assert_eq!(card.lang, "de");
+
+        let english_forced = card_from_scryfall(
+            non_english("id-9"),
+            1,
+            "nonfoil".to_string(),
+            "NM".to_string(),
+            "en".to_string(),
+        );
+        assert_eq!(english_forced.lang, "en");
     }
 
     #[test]
@@ -950,8 +938,14 @@ mod tests {
     }
 
     #[test]
-    fn prompt_language_defaults_to_english() {
-        assert_eq!(prompt_language(), "en");
+    fn prompt_language_defaults_to_english_when_picking_non_german() {
+        assert_eq!(prompt_language(None), "en");
+        assert_eq!(prompt_language(Some("en")), "en");
+    }
+
+    #[test]
+    fn prompt_language_defaults_to_german_for_german_printing() {
+        assert_eq!(prompt_language(Some("de")), "de");
     }
 
     #[test]
