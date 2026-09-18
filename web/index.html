@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Collection</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171b23;
+    --panel2: #1e2430;
+    --border: #2a313d;
+    --text: #e6e9ef;
+    --dim: #94a0b0;
+    --accent: #e0b45c;
+    --foil: #f0a030;
+    --good: #6cc96c;
+    --bad: #e06c6c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 18px 20px 0;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  header h1 { margin: 0; font-size: 20px; color: var(--accent); }
+  #summary { color: var(--dim); font-size: 13px; }
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 20px;
+    max-width: 1500px;
+    margin: 12px auto 0;
+    background: rgba(15, 17, 21, 0.92);
+    backdrop-filter: blur(4px);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .toolbar input, .toolbar select, .toolbar button {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+  }
+  .toolbar input[type="search"] { flex: 1 1 260px; min-width: 200px; }
+  .toolbar input[type="number"] { width: 92px; }
+  .toolbar button { cursor: pointer; }
+  .toolbar button:hover { border-color: var(--accent); }
+  main { max-width: 1500px; margin: 0 auto; padding: 16px 20px 48px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 18px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .tile:hover {
+    transform: translateY(-3px);
+    border-color: var(--accent);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+  .art {
+    position: relative;
+    aspect-ratio: 63 / 88;
+    background: var(--panel2);
+  }
+  .art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .art-ph {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+    padding: 10px;
+    color: var(--dim);
+  }
+  .art-ph .ph-title { color: var(--text); font-weight: 600; }
+  .art-ph .ph-hint { font-size: 12px; }
+  .badge {
+    position: absolute;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  .badge.qty { top: 6px; left: 6px; background: rgba(0, 0, 0, 0.65); }
+  .badge.foil {
+    top: 6px; right: 6px;
+    color: #201404;
+    background: linear-gradient(120deg, #fcd07a, var(--foil));
+    box-shadow: 0 0 8px rgba(240, 160, 48, 0.7);
+  }
+  .badge.lang { bottom: 6px; right: 6px; background: rgba(0, 0, 0, 0.65); }
+  .foil-shimmer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    mix-blend-mode: screen;
+    background:
+      linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.35) 45%,
+        rgba(255, 220, 140, 0.55) 50%, rgba(255, 255, 255, 0.35) 55%, transparent 65%);
+    background-size: 220% 100%;
+    animation: shimmer 3s linear infinite;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .meta { padding: 9px 10px 11px; }
+  .meta .name {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meta .sub { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .meta .row3 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 5px;
+    font-size: 12px;
+  }
+  .cond { color: var(--dim); }
+  .price { color: var(--good); font-weight: 600; }
+  .tile-unresolved { color: var(--dim); }
+  .empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--dim);
+    padding: 60px 0;
+  }
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.72);
+    padding: 20px;
+  }
+  .modal.hidden { display: none; }
+  .modal-card {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    max-width: 880px;
+    width: 100%;
+    max-height: 90vh;
+    overflow: auto;
+    padding: 24px;
+  }
+  .modal-card .close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--dim);
+    font: inherit;
+    cursor: pointer;
+    line-height: 1;
+    padding: 6px 9px;
+  }
+  .modal-card .close:hover { color: var(--text); border-color: var(--accent); }
+  .modal-flex { display: flex; gap: 22px; align-items: flex-start; }
+  .modal-art { width: 250px; border-radius: 8px; flex-shrink: 0; }
+  .modal-detail { flex: 1; min-width: 0; }
+  .modal-detail h2 { margin: 0 0 10px; color: var(--accent); }
+  .modal-detail .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .modal-detail .badge { position: static; display: inline-block; }
+  .modal-detail .badge.nf { background: var(--panel2); border: 1px solid var(--border); }
+  .modal-detail .badge.cond { background: rgba(108, 201, 108, 0.16); }
+  .modal-detail .type { color: var(--text); margin: 0 0 8px; }
+  .modal-detail .oracle { color: var(--dim); white-space: pre-wrap; margin: 0 0 16px; }
+  .modal-detail h3 { font-size: 13px; text-transform: uppercase; color: var(--dim); margin: 16px 0 6px; letter-spacing: 0.06em; }
+  .prices, .print { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .prices td, .print td { padding: 3px 0; }
+  .prices td.amount { text-align: right; color: var(--good); font-weight: 600; }
+  .prices tr.highlight td { color: var(--accent); }
+  .print td:first-child { color: var(--dim); width: 90px; }
+  .hint {
+    margin-top: 16px;
+    color: var(--bad);
+    font-size: 13px;
+    border: 1px solid rgba(224, 108, 108, 0.4);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  @media (max-width: 720px) {
+    .modal-flex { flex-direction: column; }
+    .modal-art { width: 100%; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>MTG Collection</h1>
+  <span id="summary">Loading…</span>
+</header>
+
+<div class="toolbar">
+  <input id="f-search" type="search" placeholder="Search name, oracle text, type line, set…">
+  <select id="f-finish" title="Finish">
+    <option value="all">Finish: all</option>
+    <option value="nonfoil">nonfoil</option>
+    <option value="foil">foil</option>
+  </select>
+  <select id="f-condition" title="Condition">
+    <option value="all">Condition: all</option>
+    <option value="NM">NM</option>
+    <option value="LP">LP</option>
+    <option value="MP">MP</option>
+    <option value="HP">HP</option>
+    <option value="D">D</option>
+  </select>
+  <select id="f-set" title="Set"><option value="all">Set: all</option></select>
+  <select id="f-rarity" title="Rarity"><option value="all">Rarity: all</option></select>
+  <select id="f-lang" title="Language"><option value="all">Language: all</option></select>
+  <select id="f-color" title="Color identity">
+    <option value="all">Color: all</option>
+    <option value="W">White</option>
+    <option value="U">Blue</option>
+    <option value="B">Black</option>
+    <option value="R">Red</option>
+    <option value="G">Green</option>
+    <option value="C">Colorless</option>
+  </select>
+  <input id="f-cmc-min" type="number" min="0" step="1" placeholder="CMC ≥">
+  <input id="f-cmc-max" type="number" min="0" step="1" placeholder="CMC ≤">
+  <input id="f-price-min" type="number" min="0" step="any" placeholder="€ ≥">
+  <input id="f-price-max" type="number" min="0" step="any" placeholder="€ ≤">
+  <input id="f-copies" type="number" min="1" step="1" placeholder="Copies ≥">
+  <select id="f-sort" title="Sort"></select>
+  <button id="f-dir" title="Toggle sort direction">↑</button>
+  <button id="f-reset" title="Reset filters">Reset</button>
+</div>
+
+<main>
+  <div id="grid" class="grid"></div>
+</main>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <button class="close" id="modal-close" title="Close">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const MIN_BATCH = 75;
+const SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection";
+
+const state = {
+  entries: [],
+  cache: new Map(),
+  filters: {
+    search: "", finish: "all", condition: "all", set: "all", rarity: "all",
+    lang: "all", color: "all", cmcMin: "", cmcMax: "", priceMin: "",
+    priceMax: "", copies: "",
+  },
+  sort: "name",
+  dir: 1,
+};
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[c]));
+
+const keyOf = (set, number) => `${set}#${number}`;
+
+function artUrl(data) {
+  if (!data) return null;
+  const uris = data.image_uris || (data.card_faces && data.card_faces[0] && data.card_faces[0].image_uris);
+  if (!uris) return null;
+  return uris.large || uris.normal || uris.small || uris.png || null;
+}
+
+function priceOf(entry) {
+  const p = entry.data && entry.data.prices;
+  if (!p) return null;
+  const v = entry.card.finish === "foil" ? p.eur_foil : p.eur;
+  return v !== null && v !== undefined ? v : null;
+}
+
+const SORTS = {
+  name: ["Name", (a, b) => a.card.name.localeCompare(b.card.name)],
+  set: ["Set + number", (a, b) =>
+    keyOf(a.card.set, a.card.collector_number).localeCompare(
+      keyOf(b.card.set, b.card.collector_number), undefined, { numeric: true })],
+  price: ["Price", (a, b) => (Number(priceOf(a)) || 0) - (Number(priceOf(b)) || 0)],
+  qty: ["Quantity", (a, b) => a.card.quantity - b.card.quantity],
+};
+
+function fillSelect(id, placeholder, label, values, current) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = `<option value="${placeholder}">${label}</option>` +
+    values.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+
+function populateFilterOptions() {
+  const sets = new Set(), rarities = new Set(), langs = new Set();
+  for (const { card, data } of state.entries) {
+    sets.add(card.set);
+    langs.add(card.lang || "en");
+    if (data && data.rarity) rarities.add(data.rarity);
+  }
+  fillSelect("f-set", "all", "Set: all", [...sets].sort(), state.filters.set);
+  fillSelect("f-rarity", "all", "Rarity: all", [...rarities].sort(), state.filters.rarity);
+  fillSelect("f-lang", "all", "Language: all", [...langs].sort(), state.filters.lang);
+
+  const sortSel = document.getElementById("f-sort");
+  sortSel.innerHTML = Object.entries(SORTS)
+    .map(([id, [label]]) => `<option value="${id}">Sort: ${label}</option>`).join("");
+  sortSel.value = state.sort;
+}
+
+function readFilters() {
+  const g = (id) => document.getElementById(id).value;
+  state.filters = {
+    search: g("f-search").trim().toLowerCase(),
+    finish: g("f-finish"),
+    condition: g("f-condition"),
+    set: g("f-set"),
+    rarity: g("f-rarity"),
+    lang: g("f-lang"),
+    color: g("f-color"),
+    cmcMin: g("f-cmc-min"),
+    cmcMax: g("f-cmc-max"),
+    priceMin: g("f-price-min"),
+    priceMax: g("f-price-max"),
+    copies: g("f-copies"),
+  };
+}
+
+function matches(entry) {
+  const f = state.filters, { card, data } = entry;
+  if (f.search) {
+    const hay = [
+      card.name, card.set, (data && data.set_name) || "",
+      (data && data.oracle_text) || "", (data && data.type_line) || "",
+    ].join(" ").toLowerCase();
+    if (!hay.includes(f.search)) return false;
+  }
+  if (f.finish !== "all" && card.finish !== f.finish) return false;
+  if (f.condition !== "all" && card.condition !== f.condition) return false;
+  if (f.set !== "all" && card.set !== f.set) return false;
+  if (f.rarity !== "all" && data && data.rarity !== f.rarity) return false;
+  if (f.rarity !== "all" && !data) return false;
+  if (f.lang !== "all" && (card.lang || "en") !== f.lang) return false;
+  const identity = (data && data.color_identity) || [];
+  if (f.color !== "all") {
+    if (f.color === "C" ? identity.length !== 0 : !identity.includes(f.color)) return false;
+  }
+  const cmc = data && data.cmc;
+  if (f.cmcMin !== "" && (cmc === undefined || cmc < Number(f.cmcMin))) return false;
+  if (f.cmcMax !== "" && (cmc === undefined || cmc > Number(f.cmcMax))) return false;
+  const price = priceOf(entry);
+  if (f.priceMin !== "" && (price === null || Number(price) < Number(f.priceMin))) return false;
+  if (f.priceMax !== "" && (price === null || Number(price) > Number(f.priceMax))) return false;
+  if (f.copies !== "" && card.quantity < Number(f.copies)) return false;
+  return true;
+}
+
+function artHtml(entry) {
+  const { card, data } = entry;
+  const url = artUrl(data);
+  const qty = `<span class="badge qty">×${card.quantity}</span>`;
+  const foil = card.finish === "foil"
+    ? `<span class="badge foil">FOIL</span><span class="foil-shimmer"></span>` : "";
+  const lang = card.lang && card.lang !== "en"
+    ? `<span class="badge lang">${esc(card.lang.toUpperCase())}</span>` : "";
+  if (url) {
+    return `<div class="art">
+      <img src="${esc(url)}" alt="${esc(card.name)}" loading="lazy">
+      ${foil}${qty}${lang}
+    </div>`;
+  }
+  if (!data) {
+    return `<div class="art art-ph">
+      <span class="ph-title">No art</span>
+      <span class="ph-hint">${card.collector_number
+        ? "not_found on Scryfall" : "old-format card"}</span>
+      <span class="ph-hint">remove &amp; re-add via CLI</span>
+      ${qty}${foil}${lang}
+    </div>`;
+  }
+  return `<div class="art art-ph">
+    <span class="ph-title">${esc(card.name)}</span>
+    <span class="ph-hint">no art available</span>
+    ${qty}${foil}${lang}
+  </div>`;
+}
+
+function metaHtml(entry) {
+  const { card, data } = entry;
+  const setNum = card.collector_number
+    ? `${esc(card.set.toUpperCase())} #${esc(card.collector_number)}`
+    : esc(card.set.toUpperCase());
+  const price = priceOf(entry);
+  return `<div class="meta">
+    <div class="name" title="${esc(card.name)}">${esc(card.name)}${data ? "" : " *"}</div>
+    <div class="sub">${setNum}</div>
+    <div class="row3">
+      <span class="cond">${esc(card.condition)}</span>
+      ${price !== null ? `<span class="price">€${esc(price)}</span>` : ""}
+    </div>
+  </div>`;
+}
+
+function tile(entry) {
+  const el = document.createElement("article");
+  el.className = "tile" + (entry.data ? "" : " tile-unresolved");
+  el.innerHTML = artHtml(entry) + metaHtml(entry);
+  el.addEventListener("click", () => openModal(entry));
+  return el;
+}
+
+function openModal(entry) {
+  const { card, data } = entry;
+  const body = document.getElementById("modal-body");
+  let html = `<div class="modal-flex">`;
+  const url = artUrl(data);
+  if (url) html += `<img class="modal-art" src="${esc(url)}" alt="">`;
+  html += `<div class="modal-detail"><h2>${esc(card.name)}</h2>`;
+  html += `<div class="badges">
+    <span class="badge ${card.finish === "foil" ? "foil" : "nf"}">${card.finish === "foil" ? "FOIL" : "NONFOIL"}</span>
+    <span class="badge cond">${esc(card.condition)}</span>
+    ${card.lang && card.lang !== "en" ? `<span class="badge lang">${esc(card.lang.toUpperCase())}</span>` : ""}
+    <span class="badge qty">×${card.quantity}</span>
+  </div>`;
+
+  if (data) {
+    const cost = data.mana_cost ? `  ${esc(data.mana_cost)}` : "";
+    html += `<p class="type">${esc(data.type_line)}${cost}</p>`;
+    if (data.oracle_text) html += `<p class="oracle">${esc(data.oracle_text)}</p>`;
+
+    const p = data.prices || {};
+    const priceRows = [
+      ["EUR (nonfoil)", p.eur], ["EUR (foil)", p.eur_foil],
+    ].filter(([, v]) => v);
+    if (priceRows.length) {
+      html += `<h3>Prices</h3><table class="prices">`;
+      for (const [label, v] of priceRows) {
+        const hl = (v === (card.finish === "foil" ? p.eur_foil : p.eur));
+        html += `<tr${hl ? ' class="highlight"' : ""}><td>${label}</td><td class="amount">€${esc(v)}</td></tr>`;
+      }
+      html += `</table>`;
+    }
+
+    html += `<h3>Print info</h3><table class="print">
+      <tr><td>Set</td><td>${esc(data.set_name || "")} (${esc(data.set.toUpperCase())})</td></tr>
+      ${data.released_at ? `<tr><td>Released</td><td>${esc(data.released_at)}</td></tr>` : ""}
+      <tr><td>Rarity</td><td>${esc(data.rarity)}</td></tr>
+      <tr><td>Number</td><td>${esc(data.collector_number)}</td></tr>
+    </table>`;
+  } else {
+    html += `<p class="hint">Details unavailable — remove &amp; re-add this card via the CLI to restore art, text and prices.</p>`;
+  }
+
+  html += `</div></div>`;
+  body.innerHTML = html;
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.add("hidden");
+}
+
+function render() {
+  readFilters();
+  const shown = state.entries.filter(matches).sort((a, b) => {
+    const cmp = SORTS[state.sort][1](a, b);
+    return cmp !== 0 ? cmp * state.dir : a.card.name.localeCompare(b.card.name);
+  });
+  const grid = document.getElementById("grid");
+  grid.replaceChildren();
+  if (shown.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No cards match the current filters.";
+    grid.appendChild(empty);
+  } else {
+    shown.forEach((e) => grid.appendChild(tile(e)));
+  }
+  const total = state.entries.reduce((s, e) => s + e.card.quantity, 0);
+  const shownQty = shown.reduce((s, e) => s + e.card.quantity, 0);
+  const unresolved = state.entries.filter((e) => !e.data).length;
+  document.getElementById("summary").textContent =
+    `${shown.length} of ${state.entries.length} entries · ${shownQty} copies shown · ` +
+    (`${total} copies total` + (unresolved ? ` · ${unresolved} unresolved` : ""));
+}
+
+function resetFilters() {
+  for (const [id, val] of Object.entries({
+    "f-search": "", "f-finish": "all", "f-condition": "all", "f-set": "all",
+    "f-rarity": "all", "f-lang": "all", "f-color": "all", "f-cmc-min": "",
+    "f-cmc-max": "", "f-price-min": "", "f-price-max": "", "f-copies": "",
+  })) document.getElementById(id).value = val;
+  state.sort = "name";
+  state.dir = 1;
+  document.getElementById("f-sort").value = "name";
+  document.getElementById("f-dir").textContent = "↑";
+  render();
+}
+
+function wire() {
+  document.querySelectorAll(".toolbar input, .toolbar select")
+    .forEach((el) => el.addEventListener("input", render));
+  document.getElementById("f-sort").addEventListener("change", (e) => {
+    state.sort = e.target.value;
+    render();
+  });
+  document.getElementById("f-dir").addEventListener("click", (e) => {
+    state.dir *= -1;
+    e.target.textContent = state.dir > 0 ? "↑" : "↓";
+    render();
+  });
+  document.getElementById("f-reset").addEventListener("click", resetFilters);
+  document.getElementById("modal-close").addEventListener("click", closeModal);
+  document.getElementById("modal").addEventListener("click", (e) => {
+    if (e.target.id === "modal") closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
+  });
+}
+
+async function resolveDetails(cards) {
+  const keyed = cards.filter((c) => c.collector_number);
+  for (let i = 0; i < keyed.length; i += MIN_BATCH) {
+    const chunk = keyed.slice(i, i + MIN_BATCH);
+    try {
+      const resp = await fetch(SCRYFALL_COLLECTION, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifiers: chunk.map((c) => ({ set: c.set, collector_number: c.collector_number })),
+        }),
+      });
+      if (!resp.ok) throw new Error(`Scryfall responded ${resp.status}`);
+      const result = await resp.json();
+      for (const card of result.data) state.cache.set(keyOf(card.set, card.collector_number), card);
+    } catch (err) {
+      console.warn("Scryfall resolution failed:", err);
+    }
+  }
+}
+
+async function init() {
+  wire();
+  let cards;
+  try {
+    const resp = await fetch("/cards");
+    if (!resp.ok) throw new Error(`GET /cards responded ${resp.status}`);
+    const collection = await resp.json();
+    cards = collection.cards || [];
+  } catch (err) {
+    document.getElementById("summary").textContent = "Failed to load collection: " + err.message;
+    return;
+  }
+  await resolveDetails(cards);
+  state.entries = cards.map((c) => ({
+    card: c,
+    data: state.cache.get(keyOf(c.set, c.collector_number)) || null,
+  }));
+  populateFilterOptions();
+  render();
+}
+
+init();
+</script>
+</body>
+</html>

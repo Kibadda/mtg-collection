@@ -1,6 +1,7 @@
 use crate::collection::{Card, Collection};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
+use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clap::Parser;
@@ -51,6 +52,7 @@ struct SearchParams {
 
 pub fn router(state: SharedState) -> Router {
     Router::new()
+        .route("/", get(index))
         .route("/cards", get(list_cards).post(add_card))
         .route("/cards/search", get(search_cards))
         .route("/cards/remove", post(remove_card))
@@ -114,6 +116,11 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// The read-only web dashboard, embedded so the server stays a single binary.
+async fn index() -> Html<&'static str> {
+    Html(include_str!("../web/index.html"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,6 +169,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn index_serves_embedded_web_app() {
+        let (app, _) = app().await;
+        let resp = app
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let html = std::str::from_utf8(&body).unwrap();
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("scryfall.com/cards/collection"));
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ card images in your terminal, and add cards to a local file or a remote
   `mtg-server` instance and the collection lives on one machine only
 - Server-side quantity merging (the collection file is the single source of
   truth)
+- Read-only web dashboard served by `mtg-server` at `/`
 
 ## Build & install
 
@@ -90,6 +91,20 @@ $ mtg-collection remove "Sol Ring"
 `add` quantities merge server-side: adding the same card twice results in a
 single entry with the summed quantity. Scryfall search and image preview still
 run on the client.
+
+### Web UI
+
+`mtg-server` also hosts a read-only web dashboard. Point a browser at the
+server root (`http://<host>:<port>/`) to browse the collection: card art,
+oracle text and prices are fetched live from Scryfall in the browser, and foil
+copies get a shimmer treatment. Search, filters (finish, condition, set,
+rarity, language, color identity, CMC, price, minimum copies), sorting and a
+detail modal are all client-side.
+
+The UI is query-only — collection edits always go through the CLI. Cards saved
+before collector numbers were tracked (and any printing Scryfall no longer
+resolves) show a placeholder; remove and re-add them via the CLI to restore
+their details.
 
 To go back to the local file:
 
