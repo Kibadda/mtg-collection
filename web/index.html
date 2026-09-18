@@ -601,7 +601,27 @@ async function init() {
   render();
 }
 
+async function refresh() {
+  try {
+    const resp = await fetch("/cards");
+    if (!resp.ok) return;
+    const cards = (await resp.json()).cards || [];
+    const missing = cards.filter((c) => c.collector_number &&
+      !state.cache.has(keyOf(c.set, c.collector_number)));
+    if (missing.length) await resolveDetails(missing);
+    state.entries = cards.map((c) => ({
+      card: c,
+      data: state.cache.get(keyOf(c.set, c.collector_number)) || null,
+    }));
+    populateFilterOptions();
+    render();
+  } catch (err) {
+    console.warn("Refresh failed:", err);
+  }
+}
+
 init();
+setInterval(refresh, 20000);
 </script>
 </body>
 </html>
